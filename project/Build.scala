@@ -5,7 +5,7 @@ object MyBuild extends Build {
   override lazy val settings = super.settings ++ Seq(
     name := "spire",
     organization := "org.spire-math",
-    version := "0.2.0-M1",
+    version := "0.2.0-M2",
     scalaVersion := "2.9.2",
 
     licenses := Seq("BSD-style" -> url("http://opensource.org/licenses/MIT")),
