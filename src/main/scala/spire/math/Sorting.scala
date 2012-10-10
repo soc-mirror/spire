@@ -1,9 +1,8 @@
 package spire.math
 
+import scala.annotation.tailrec
 import scala.{specialized => spec}
 import scala.math.min
-
-//import Implicits._
 
 /**
  *  Interface for a sorting strategy object.
@@ -11,6 +10,26 @@ import scala.math.min
 trait Sort {
   def sort[@spec A:Order:Manifest](data:Array[A]): Unit
 }
+
+object InsertionSort extends Sort {
+  final def sort[@spec A:Order:Manifest](data:Array[A]) = sort(data, 0, data.length)
+
+  final def sort[@spec A](data:Array[A], start:Int, end:Int)
+  (implicit o:Order[A], ct:Manifest[A]) = {
+    var i = start + 1
+    while (i < end) {
+      val item = data(i)
+      var hole = i
+      while (hole > start && o.gt(data(hole - 1), item)) {
+        data(hole) = data(hole - 1)
+        hole -= 1
+      }
+      data(hole) = item
+      i += 1
+    }
+  }
+}
+
 
 /**
  * In-place merge sort implementation. This sort is stable but does mutate
@@ -20,22 +39,32 @@ trait Sort {
  * This sort is faster than quickSort, but must allocate extra space.
  */
 object MergeSort extends Sort {
-  final def sort[@spec A:Order:Manifest](data:Array[A]) = {
+  @inline final def startWidth = 32
+  @inline final def startStep = 64
+
+  final def sort[@spec A:Order:Manifest](data:Array[A]) {
     val len = data.length
+    if (len <= startStep) return InsertionSort.sort(data)
 
     var buf1:Array[A] = data
-    var buf2:Array[A] = Array.ofDim[A](len)
+    var buf2:Array[A] = new Array[A](len)
     var tmp:Array[A] = null
 
     var i = 0
 
-    var width = 1
-    var step = 2
+    var limit = len - startWidth
+    while (i < limit) { InsertionSort.sort(data, i, i + startWidth); i += startWidth }
+    if (i < len) InsertionSort.sort(data, i, len)
+    var width = startWidth
+    var step = startStep
     while (width < len) {
       i = 0
+      limit = len - step
+      while (i < limit) {
+        merge(buf1, buf2, i, i + width, i + step); i += step
+      }
       while (i < len) {
-        merge(buf1, buf2, i, min(i + width, len), min(i + step, len))
-        i += step
+        merge(buf1, buf2, i, min(i + width, len), len); i += step
       }
       tmp = buf2
       buf2 = buf1
@@ -45,7 +74,7 @@ object MergeSort extends Sort {
       step *= 2
     }
 
-    buf1
+    if (buf1 != data) System.arraycopy(buf1, 0, data, 0, len)
   }
 
   // TODO: making this private breaks specialization, but we'd like to hide it
@@ -55,11 +84,10 @@ object MergeSort extends Sort {
    * sections of the input array. The start, mid and end parameters denote the
    * left and right ranges of the input to merge, as well as the area of the
    * ouput to write to.
-   *
-   * This method will be called approximately N times (where N is the length
-   * of the array to be sorted), which is why we inline it.
    */
-  @inline final def merge[@spec A](in:Array[A], out:Array[A], start:Int, mid:Int, end:Int)(implicit o:Order[A]) {
+  @inline final def merge[@spec A]
+    (in:Array[A], out:Array[A], start:Int, mid:Int, end:Int)
+    (implicit o:Order[A]) {
     var ii = start
     var jj = mid
     var kk = start
@@ -190,6 +218,7 @@ object QuickSort {
  * uses extra memory. Quicksort is a bit faster but is O(n^2) in worst case.
  */
 object Sorting {
+  final def insertionSort[@spec A:Order:Manifest](data:Array[A]) = InsertionSort.sort(data)
   final def mergeSort[@spec A:Order:Manifest](data:Array[A]) = MergeSort.sort(data)
   final def quickSort[@spec K:Order:Manifest](data:Array[K]) = QuickSort.sort(data)
 }
