@@ -31,7 +31,7 @@ object SBigInt {
   @Tested
   final val One: SBigInt = new SBigInt(1, Array(1))
 
-  private final val MinusOne = SBigInt(-1)
+  final val MinusOne: SBigInt = SBigInt(-1)
 
   private val LogTwo: Double = math.log(2.0)
 
@@ -71,9 +71,9 @@ object SBigInt {
     "00000000000000000000000000000000000000000000000000000000000000",
     "000000000000000000000000000000000000000000000000000000000000000")
 
-  private var logCache: Array[Double] = null
+  @transient private var logCache: Array[Double] = null
 
-  private var powerCache: Array[java.util.ArrayList[SBigInt]] = null
+  @transient private var powerCache: Array[java.util.ArrayList[SBigInt]] = null
 
   //CONSTANTS∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧//
   //FACTORIES∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨//
@@ -257,7 +257,7 @@ object SBigInt {
     if (startPos == len)
       SBigInt.Zero
     else {
-      val newLen = (startPos - len)
+      val newLen = (len - startPos)
       var arrSize = {
         var result = newLen / 32
         if (newLen % 32 != 0)
@@ -265,11 +265,18 @@ object SBigInt {
         result
       }
 
-      val digits = new Array[Int](newLen)
-      ???
-    }
+      val digits = new Array[Int](arrSize)
 
-    ???
+      var current = len-1
+      while (current >= startPos) {
+        val arrayIndex = current / 32
+        val numBitIndex = current % 32
+        val numBits = digits(arrayIndex)
+        digits(arrayIndex) = numBits | charToInt(str.charAt(current)) << numBitIndex
+        current -= 1
+      }
+      new SBigInt(sign, digits)
+    }
   }
 
   //PARSING∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧//
@@ -340,6 +347,12 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
   def isOne: Boolean = signum == 1 && arr.length == 1 && arr(0) == 1
   @Finished
   @Tested
+  def isEven: Boolean = isZero || ((arr(0) & 0x1) == 0)
+  @Finished
+  @Tested
+  def isOdd: Boolean = !isZero && ((arr(0) & 0x1) == 1)
+  @Finished
+  @Tested
   def isValidLong: Boolean = this >= Long.MinValue && this <= Long.MaxValue
   /** Returns `true` iff this can be represented exactly by [[scala.Float]]; otherwise returns `false`. */
   def isValidFloat = {
@@ -393,9 +406,10 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
     val len = arr.length
     while (i < len) {
       bits += Integer bitCount arr(i)
+      i += 1
     }
     if (isNegative) {
-      ???
+      // TODO?
     }
     bits
   }
@@ -894,8 +908,17 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
     */
   def mod(that: SBigInt): SBigInt = ???
 
-  /** Returns the greatest common divisor of abs(this) and abs(that). */
-  def gcd(that: SBigInt): SBigInt = ???
+  /** Returns the greatest common divisor of `this.abs` and `that.abs`. */
+  def gcd(that: SBigInt): SBigInt = {
+    if (this.isZero)
+      that.abs
+    else if (that.isZero)
+      this.abs
+    else if (this.arr.length == 1 && this.arr(0) == 1 || that.arr.length == 1 && that.arr(0) == 1)
+      SBigInt.One
+    else
+      ???
+  }
 
   def square: SBigInt = {
     if (signum == 0)
@@ -983,8 +1006,18 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
   def pow(exponent: Int): SBigInt = {
     if (exponent < 0)
       throw new ArithmeticException(s"Negative exponent: $exponent");
-    if (signum == 0)
-      return if (exponent == 0) SBigInt.One else this
+
+    if (signum == 0) {
+      if (exponent == 0)
+        return SBigInt.One
+      else
+        return SBigInt.Zero
+    } else {
+      if (exponent == 0)
+        return SBigInt.One
+      if (exponent == 1)
+        return this
+    }
 
     var partToSquare = this.abs
 
@@ -1304,12 +1337,20 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
     val buf = new StringBuilder
     var i = 0
     while (i < arr.length) {
-      val str = arr(i).toBinaryString
-      buf ++= str
+      paddedBinaryString(buf, arr(i))
       i += 1
     }
     if (buf.isEmpty) "0"
     else buf.toString
+  }
+
+  private def paddedBinaryString(sb: StringBuilder, i: Int): Unit = {
+    val str = i.toBinaryString
+    val missingChars = 32 - str.length
+    if (missingChars > 0) {
+      sb ++= ("0" * missingChars)
+    }
+    sb ++= str
   }
 
   def toDebugString: String = signToString + binDebStr

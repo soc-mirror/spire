@@ -38,7 +38,7 @@ class SBigIntTest extends FunSuite {
 //    npe { bi % null }
     npe { bi /% null }
 //    npe { bi mod null }
-//    npe { bi gcd null }
+    npe { bi gcd null }
     npe { bi min null }
     npe { bi max null }
 //    npe { bi & null }
@@ -63,6 +63,18 @@ class SBigIntTest extends FunSuite {
   test("BigInt#isOne") {
     assert(!SBigInt.Zero.isOne)
     assert(SBigInt.One.isOne)
+  }
+
+  test("BigInt#isEven") {
+    assert(SBigInt.Zero.isEven)
+    assert(!SBigInt.One.isEven)
+    assert(!SBigInt.MinusOne.isEven)
+  }
+
+  test("BigInt#isOdd") {
+    assert(!SBigInt.Zero.isOdd)
+    assert(SBigInt.One.isOdd)
+    assert(SBigInt.MinusOne.isOdd)
   }
 
   test("BigInt(0) equal to BigInt.Zero") {
@@ -122,14 +134,24 @@ class SBigIntTest extends FunSuite {
     }
   }
 
-  ignore("BigInt#fromBinaryString(String)") {
+  test("BigInt#fromBinaryString(String)") {
     for (i <- interestingValues) {
       val jBigInt = new BigInteger(i.toString, 2)
-      assert(SBigInt.fromBinaryString(jBigInt.toString(2)) === jBigInt)
+      assert((SBigInt.fromBinaryString(jBigInt.toString(2)) compare jBigInt) === 0)
     }
   }
 
-  ignore("Fail to create BigInt from invalid String") {
+  test("SBigInt#toBinaryString") {
+    for (i <- List(-9223372036854775808L)) {
+      val sbigint = SBigInt(i)
+      val jbigInt = BigInteger.valueOf(i)
+      val sbibin = sbigint.toBinaryString
+      val jbibin = jbigInt.toString(2)
+      assert(sbibin === jbibin, s"Failed value: $i, ${i.toBinaryString},\ns.toBinStr: $sbibin,\nj.toBinStr: $jbibin")
+    }
+  }
+
+  test("Fail to create BigInt from invalid String") {
     val invalidStrings = Array("042", "+", "+-1", "-+1", "1.0", ".5", "1.", "0xFF", "1-1", "1+1")
     for (i <- invalidStrings) {
       intercept[NumberFormatException]{
@@ -159,14 +181,6 @@ class SBigIntTest extends FunSuite {
     }
   }
 
-  test("SBigInt#toBinaryString") {
-    for (i <- List(-9223372036854775808L)) {
-      val sbigint = SBigInt(i)
-      val jbigInt = BigInteger.valueOf(i)
-      assert(sbigint.toBinaryString === jbigInt.toString(2), s"Failed value: $i,\ns.toBinStr: ${i.toBinaryString},\nj.toBinStr: ${jbigInt.toString(2)}")
-    }
-  }
-
   test("SBigInt#unary_-") {
     for (i <- interestingValues) {
       val sbigint = -SBigInt(i)
@@ -178,12 +192,12 @@ class SBigIntTest extends FunSuite {
   ignore("SBigInt#hashCode is equal to BigInt") {
     for (i <- interestingValues) {
       val sbigint = SBigInt(i)
-      val oldbigInt = BigInt(i.toString)
-      assert(sbigint.hashCode === oldbigInt.hashCode, interestingValues indexOf i)
+      val bigInt = BigInt(i)
+      assert(sbigint.hashCode === bigInt.hashCode, s"$i")
     }
   }
 
-  ignore("SBigInt#hashCode is equal for 32-bit Ints") {
+  test("SBigInt#hashCode is equal for 32-bit Ints") {
     def unifiedPrimitiveHashcode(long: Long) =
       if (long >= Int.MinValue && long <= Int.MaxValue) long.toInt
       else long.##
@@ -191,7 +205,7 @@ class SBigIntTest extends FunSuite {
     for (i <- smallValues ++ randomIntValues) {
       val sbigint = SBigInt(i)
       assert(sbigint.isValidInt)
-      assert(sbigint.hashCode === unifiedPrimitiveHashcode(i), sbigint.toString)
+      assert(sbigint.hashCode === unifiedPrimitiveHashcode(i), sbigint.toDebugString)
     }
   }
 
@@ -201,6 +215,51 @@ class SBigIntTest extends FunSuite {
       val ssum = (sbigint + sbigint)
       val jbigInt = new BigInteger(i.toString)
       val jsum = jbigInt add jbigInt
+      assert(ssum === jsum, ssum.toDebugString)
+    }
+
+    for (i <- interestingValues) {
+      val sbigint = SBigInt(i)
+      val ssum = (sbigint + sbigint + sbigint)
+      val jbigInt = new BigInteger(i.toString)
+      val jsum = jbigInt add jbigInt add jbigInt
+      assert(ssum === jsum, ssum.toDebugString)
+    }
+  }
+
+  test("SBigInt#-") {
+    for (i <- interestingValues) {
+      val sbigint = SBigInt(i)
+      val ssum = (sbigint - sbigint)
+      val jbigInt = new BigInteger(i.toString)
+      val jsum = jbigInt subtract jbigInt
+      assert(ssum === jsum, ssum.toDebugString)
+    }
+
+    for (i <- interestingValues) {
+      val sbigint = SBigInt(i)
+      val ssum = (sbigint + sbigint - sbigint)
+      val jbigInt = new BigInteger(i.toString)
+      val jsum = jbigInt add jbigInt subtract jbigInt
+      assert(ssum === jsum, ssum.toDebugString)
+    }
+  }
+
+  ignore("SBigInt#*") {
+    for (i <- interestingValues) {
+      val sbigint = SBigInt(i)
+      val ssum = (sbigint * sbigint)
+      val jbigInt = new BigInteger(i.toString)
+      val jsum = jbigInt multiply jbigInt
+      assert(ssum === jsum, ssum.toDebugString)
+    }
+
+    for (i <- interestingValues) {
+      val sbigint = SBigInt(i)
+      val ssum = (sbigint * sbigint * sbigint)
+      val jbigInt = new BigInteger(i.toString)
+      val jsum = jbigInt multiply jbigInt multiply jbigInt
+      assert(ssum.isZero)
       assert(ssum === jsum, ssum.toDebugString)
     }
   }
@@ -213,13 +272,80 @@ class SBigIntTest extends FunSuite {
     }
   }
 
+  test("BigInt#gcd") {
+    assert((SBigInt.Zero     gcd SBigInt.Zero)     == SBigInt.Zero)
+    assert((SBigInt.Zero     gcd SBigInt.One)      == SBigInt.One)
+    assert((SBigInt.One      gcd SBigInt.Zero)     == SBigInt.One)
+    assert((SBigInt.One      gcd SBigInt.One)      == SBigInt.One)
+    assert((SBigInt.Zero     gcd SBigInt.MinusOne) == SBigInt.One)
+    assert((SBigInt.MinusOne gcd SBigInt.Zero)     == SBigInt.One)
+    assert((SBigInt.One      gcd SBigInt.MinusOne) == SBigInt.One)
+    //assert((SBigInt(12)      gcd SBigInt(9))       == SBigInt(3))
+  }
+
+  test("BigInt#pow") {
+    intercept[ArithmeticException] {
+      SBigInt(1) pow -1
+    }
+
+    assert(1       === (SBigInt.Zero   pow  0), "    0 pow  0")
+    assert(0       === (SBigInt.Zero   pow  1), "    0 pow  1")
+    assert(0       === (SBigInt.Zero   pow 42), "    0 pow 42")
+    assert(1       === (SBigInt(99999) pow  0), "99999 pow  0")
+    assert(99999   === (SBigInt(99999) pow  1), "99999 pow  1")
+//    assert(59049   === (    SBigInt(3) pow 10),     "3 pow 10")
+//    assert(177147  === (    SBigInt(3) pow 11),     "3 pow 11")
+//    assert(-177147 === (   SBigInt(-3) pow 11),    "-3 pow 11")
+
+  }
+
   test("BigInt#signBits") {
     val bi1 = SBigInt(-1)
     val bi2 = SBigInt(0)
     val bi3 = SBigInt(1)
 
     assert(bi1.signBits == -1)
-    assert(bi2.signBits == 0)
-    assert(bi3.signBits == 0)
+    assert(bi2.signBits ==  0)
+    assert(bi3.signBits ==  0)
+  }
+
+  test("BigInt#bitCount") {
+    for (i <- interestingValues) {
+      val sbigint = SBigInt(i)
+      val jbigInt = BigInteger valueOf i
+      assert(sbigint.bitCount === sbigint.bitCount, i)
+    }
+  }
+
+  test("BigInt#longValue") {
+    for (i <- interestingValues) {
+      val sbigint = SBigInt(i)
+      val jbigInt = BigInteger valueOf i
+      assert(sbigint.longValue === sbigint.longValue, i)
+    }
+  }
+
+  test("BigInt#intValue") {
+    for (i <- interestingValues) {
+      val sbigint = SBigInt(i)
+      val jbigInt = BigInteger valueOf i
+      assert(sbigint.intValue === sbigint.intValue, i)
+    }
+  }
+
+  ignore("BigInt#doubleValue") {
+    for (i <- interestingValues) {
+      val sbigint = SBigInt(i)
+      val jbigInt = BigInteger valueOf i
+      assert(sbigint.doubleValue === sbigint.doubleValue, i)
+    }
+  }
+
+  ignore("BigInt#floatValue") {
+    for (i <- interestingValues) {
+      val sbigint = SBigInt(i)
+      val jbigInt = BigInteger valueOf i
+      assert(sbigint.floatValue === sbigint.floatValue, i)
+    }
   }
 }
