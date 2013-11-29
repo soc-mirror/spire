@@ -21,6 +21,19 @@ class SBigIntTest extends FunSuite {
     longMinMaxValues ++
     randomIntValues
 
+  //
+
+  val bigIntegerCtor = {
+    val ctor = classOf[java.math.BigInteger].getDeclaredConstructor(classOf[Int], classOf[Array[Int]])
+    ctor setAccessible true
+    ctor
+  }
+
+  def signAndArrayToSafeBigInteger(signum: Int, arr: Array[Int]) =
+    bigIntegerCtor.newInstance(signum.asInstanceOf[Object], arr)
+
+  //
+
   test("BigInt#arr should not be accessible") {
     intercept[NoSuchFieldException] {
       classOf[SBigInt].getField("arr")
@@ -131,6 +144,25 @@ class SBigIntTest extends FunSuite {
   ignore("BigInt#apply(String)") {
     for (i <- interestingValues) {
       assert(SBigInt(i.toString).toString === new BigInteger(i.toString).toString, i)
+    }
+  }
+
+  test("BigInt#fromArray(signum: Int, arr: Array[Int]) — with valid inputs") {
+    for ((sig, mag) <- List((0, Array[Int]()), (1, Array(1,1,1)), (-1, Array(Int.MaxValue, Int.MinValue)), (-1, Array(Int.MinValue, Int.MaxValue)))) {
+      val jbigint = signAndArrayToSafeBigInteger(sig, mag)
+      val sbigint = SBigInt.fromArray(sig, mag)
+      assert((sbigint compare jbigint) === 0)
+    }
+  }
+
+  ignore("BigInt#fromArray(signum: Int, arr: Array[Int]) — with invalid inputs") {
+    for ((sig, mag) <- List(/*(0, Array(0)),*/ (0, Array(1)), (1, Array(0)), (-1, Array[Int]()))) {
+      intercept[java.lang.reflect.InvocationTargetException] { // cause: NumberFormatException
+        signAndArrayToSafeBigInteger(sig, mag)
+      }
+      intercept[IllegalArgumentException] {
+        SBigInt.fromArray(sig, mag)
+      }
     }
   }
 
