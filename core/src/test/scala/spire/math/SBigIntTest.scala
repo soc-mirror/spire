@@ -32,13 +32,16 @@ class SBigIntTest extends FunSuite {
   def signAndArrayToSafeBigInteger(signum: Int, arr: Array[Int]) =
     bigIntegerCtor.newInstance(signum.asInstanceOf[Object], arr)
 
-  //
+  //ACCESSIBILITY∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨//
 
   test("BigInt#arr should not be accessible") {
     intercept[NoSuchFieldException] {
       classOf[SBigInt].getField("arr")
     }
   }
+
+  //ACCESSIBILITY∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧//
+  //NULLSvvvv∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨//
 
   test("BigInt's methods should throw NPE's for nulls") {
     val bi = SBigInt.Zero
@@ -60,12 +63,23 @@ class SBigIntTest extends FunSuite {
 //    npe { bi &~ null }
   }
 
+  //NULLS∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧//
+  //CONSTANTS∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨//
+
   test("BigInt(0) == null should be false") {
     assert(SBigInt.Zero != null)
   }
 
   test("BigInt(0) same as BigInt.Zero") {
     assert(SBigInt(0) eq SBigInt.Zero)
+  }
+
+  test("BigInt(0) equal to BigInt.Zero") {
+    assert(SBigInt(0) === SBigInt.Zero)
+  }
+
+  test("BigInt(1) equal to BigInt.One") {
+    assert(SBigInt(1) === SBigInt.One)
   }
 
   test("BigInt#isZero") {
@@ -78,6 +92,8 @@ class SBigIntTest extends FunSuite {
     assert(SBigInt.One.isOne)
   }
 
+  //CONSTANTS∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧//
+
   test("BigInt#isEven") {
     assert(SBigInt.Zero.isEven)
     assert(!SBigInt.One.isEven)
@@ -88,14 +104,6 @@ class SBigIntTest extends FunSuite {
     assert(!SBigInt.Zero.isOdd)
     assert(SBigInt.One.isOdd)
     assert(SBigInt.MinusOne.isOdd)
-  }
-
-  test("BigInt(0) equal to BigInt.Zero") {
-    assert(SBigInt(0) === SBigInt.Zero)
-  }
-
-  test("BigInt(1) equal to BigInt.One") {
-    assert(SBigInt(1) === SBigInt.One)
   }
 
   test("BigInt#isWhole") {
@@ -114,40 +122,37 @@ class SBigIntTest extends FunSuite {
     assert(allValid === true)
   }
 
-  test("BigInt#apply(Int(42))") {
+  test("BigInt.apply(Int(42))") {
     val bi = SBigInt(42)
     assert(bi.signum === +1)
     assert(bi.arr === Array(42))
   }
 
- test("BigInt#compare(BigInt)") {
-    val bi = SBigInt(42)
-    val bi2 = SBigInt(43)
-    assert(bi < bi2 === true)
-    assert(bi <= bi2 === true)
-    assert(bi > bi2 === false)
-    assert(bi >= bi2 === false)
-  }
-
-  ignore("Equality of toStrings") {
-    for (i <- interestingValues) {
-      assert(SBigInt(i).toString === BigInteger.valueOf(i).toString)
+  test("BigInt.apply(Long)") {
+    for (l <- interestingValues) {
+      val sbi = SBigInt(l)
+      val jbi = BigInteger valueOf l
+      assert((sbi compare jbi) === 0)
+      assert(sbi.toBinaryString === jbi.toString(2))
     }
   }
 
-  test("BigInt#bigInteger") {
-    for (i <- interestingValues) {
-      assert(SBigInt(i).bigInteger === new BigInteger(i.toString))
-    }
-  }
-
-  ignore("BigInt#apply(String)") {
+  ignore("BigInt.apply(String)") {
     for (i <- interestingValues) {
       assert(SBigInt(i.toString).toString === new BigInteger(i.toString).toString, i)
     }
   }
 
-  test("BigInt#fromArray(signum: Int, arr: Array[Int]) — with valid inputs") {
+  test("SBigInt.apply(String) — with invalid input") {
+    val invalidStrings = Array("042", "+", "+-1", "-+1", "1.0", ".5", "1.", "0xFF", "1-1", "1+1")
+    for (i <- invalidStrings) {
+      intercept[NumberFormatException]{
+        SBigInt(i)
+      }
+    }
+  }
+
+  test("BigInt.fromArray(signum: Int, arr: Array[Int]) — with valid input") {
     for ((sig, mag) <- List((0, Array[Int]()), (1, Array(1,1,1)), (-1, Array(Int.MaxValue, Int.MinValue)), (-1, Array(Int.MinValue, Int.MaxValue)))) {
       val jbigint = signAndArrayToSafeBigInteger(sig, mag)
       val sbigint = SBigInt.fromArray(sig, mag)
@@ -155,7 +160,7 @@ class SBigIntTest extends FunSuite {
     }
   }
 
-  ignore("BigInt#fromArray(signum: Int, arr: Array[Int]) — with invalid inputs") {
+  ignore("BigInt.fromArray(signum: Int, arr: Array[Int]) — with invalid input") {
     for ((sig, mag) <- List(/*(0, Array(0)),*/ (0, Array(1)), (1, Array(0)), (-1, Array[Int]()))) {
       intercept[java.lang.reflect.InvocationTargetException] { // cause: NumberFormatException
         signAndArrayToSafeBigInteger(sig, mag)
@@ -166,7 +171,7 @@ class SBigIntTest extends FunSuite {
     }
   }
 
-  test("BigInt#fromBinaryString(String)") {
+  test("BigInt.fromBinaryString(String)") {
     for (i <- interestingValues) {
       val jBigInt = new BigInteger(i.toString, 2)
       assert((SBigInt.fromBinaryString(jBigInt.toString(2)) compare jBigInt) === 0)
@@ -183,12 +188,24 @@ class SBigIntTest extends FunSuite {
     }
   }
 
-  test("Fail to create BigInt from invalid String") {
-    val invalidStrings = Array("042", "+", "+-1", "-+1", "1.0", ".5", "1.", "0xFF", "1-1", "1+1")
-    for (i <- invalidStrings) {
-      intercept[NumberFormatException]{
-        SBigInt(i)
-      }
+ test("BigInt#compare(BigInt)") {
+    val bi = SBigInt(42)
+    val bi2 = SBigInt(43)
+    assert(bi < bi2 === true)
+    assert(bi <= bi2 === true)
+    assert(bi > bi2 === false)
+    assert(bi >= bi2 === false)
+  }
+
+  ignore("BigInt#toString") {
+    for (i <- interestingValues) {
+      assert(SBigInt(i).toString === BigInteger.valueOf(i).toString)
+    }
+  }
+
+  test("BigInt#bigInteger") {
+    for (i <- interestingValues) {
+      assert(SBigInt(i).bigInteger === new BigInteger(i.toString))
     }
   }
 

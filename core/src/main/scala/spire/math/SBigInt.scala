@@ -1331,17 +1331,21 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
     }
   }
 
-  def toBinaryString: String = signToString + binStr
+  def toBinaryString: String = signToString + (if (isZero) "0" else binStr)
 
   private def binStr: String = {
     val buf = new StringBuilder
-    var i = 0
+
+    // Don't pad the first element, so we don't end up with
+    // 00000000000000000000000011111111 instead of 11111111.
+    buf ++= arr(0).toBinaryString
+
+    var i = 1
     while (i < arr.length) {
       paddedBinaryString(buf, arr(i))
       i += 1
     }
-    if (buf.isEmpty) "0"
-    else buf.toString
+    buf.toString
   }
 
   private def paddedBinaryString(sb: StringBuilder, i: Int): Unit = {
