@@ -293,8 +293,7 @@ object UtilBigEndian {
       result
   }
 
-  /**
-    * Multiplies two {@link BigInteger}s using the
+  /** Multiplies two {@link BigInteger}s using the
     * <a href="http://en.wikipedia.org/wiki/Sch%C3%B6nhage%E2%80%93Strassen_algorithm">
     * Schoenhage-Strassen algorithm</a> algorithm.
     * @param a
@@ -304,52 +303,50 @@ object UtilBigEndian {
   final def multiplySchoenhageStrassen(_a: SBigInt, _b: SBigInt): SBigInt = {
     var a = _a
     var b = _b
-
-    // remove any minus signs, multiply, then fix sign
-    val signum = a.signum * b.signum
-    if (a.signum() < 0)
-      a = -a
-    if (b.signum() < 0)
-      b = -b
-
-    val cArr = multiplySchoenhageStrassen(a.mag, a.bitLength(), b.mag, b.bitLength());
-
-    var c = SBigInt.fromArray(1, cArr);
-    if (signum < 0)
-      c = -c
-
-    return c;
+    val signum: Int = a.signum * b.signum
+    if (a.signum < 0) a = a.negate
+    if (b.signum < 0) b = b.negate
+    val cArr: Array[Int] = multiplySchoenhageStrassen(a.mag, b.mag)
+    var c: SBigInt = new SBigInt(1, cArr)
+    if (signum < 0) c = c.negate
+    return c
   }
 
-  /**
-    * This is the core Schoenhage-Strassen method. It multiplies two <b>positive</b> numbers of length
+  /** This is the core Schoenhage-Strassen method. It multiplies two <b>positive</b> numbers of length
     * <code>aBitLen</code> and </code>bBitLen</code> that are represented as int arrays, i.e. in base
     * 2<sup>32</sup>.
     * Positive means an int is always interpreted as an unsigned number, regardless of the sign bit.<br/>
     * The arrays must be ordered most significant to least significant, so the most significant digit
-    * must be at index 0.
+    * must be at index 0.<br/>
+    * If <code>a==b</code>, the DFT for b is omitted which saves roughly 1/4 of the execution time.
     * <p/>
-    * The Schoenhage-Strassen algorithm algorithm works as follows:
+    * The Schoenhage-Strassen algorithm works as follows:
     * <ol>
-    * <li>Given numbers a and b, split both numbers into pieces of length 2<sup>n-1</sup> bits.</li>
+    * <li>Given numbers a and b, split both numbers into pieces of length 2<sup>n-1</sup> bits.
+    * See the code for how n is calculated.</li>
     * <li>Take the low n+2 bits of each piece of a, zero-pad them to 3n+5 bits,
     * and concatenate them to a new number u.</li>
     * <li>Do the same for b to obtain v.</li>
-    * <li>Calculate all pieces of z' by multiplying u and v (using Schoenhage-Strassen or another
-    * algorithm). The product will contain all pieces of a*b mod n+2.</li>
-    * <li>Pad the pieces of a and b from step 1 to 2<sup>n+1</sup> bits.</li>
+    * <li>Calculate all pieces of gamma by multiplying u and v (using Schoenhage-Strassen or another
+    * algorithm).</li>
+    * <li>Split gamma into pieces of 3n+5 bits.</li>
+    * <li>Calculate z'<sub>i</sub> = gamma<sub>i</sub> + gamma<sub>i+2*2<sup>n</sup></sub> -
+    * gamma<sub>i+2<sup>n</sup></sub> - gamma<sub>i+3*2<sup>n</sup></sub> and reduce modulo
+    * 2<sup>n+2</sup>.<br/>
+    * z'<sub>i</sub> will be the i-th piece of a*b mod 2<sup>n+2</sup>.</li>
+    * <li>Pad the pieces of a and b from step 1 to 2<sup>n</sup>+1 bits.</li>
     * <li>Perform a
     * <a href="http://en.wikipedia.org/wiki/Discrete_Fourier_transform_%28general%29#Number-theoretic_transform">
     * Discrete Fourier Transform</a> (DFT) on the padded pieces.</li>
     * <li>Calculate all pieces of z" by multiplying the i-th piece of a by the i-th piece of b.</li>
     * <li>Perform an Inverse Discrete Fourier Transform (IDFT) on z". z" will contain all pieces of
-    * a*b mod Fn where Fn=2<sup>2<sup>n+1</sup></sup>.</li>
+    * a*b mod F<sub>n</sub> where F<sub>n</sub>=2<sup>2<sup>n</sup></sup>+1.</li>
     * <li>Calculate all pieces of z such that each piece is congruent to z' modulo n+2 and congruent to
-    * z" modulo Fn. This is done using the
+    * z" modulo F<sub>n</sub>. This is done using the
     * <a href="http://en.wikipedia.org/wiki/Chinese_remainder_theorem">Chinese remainder theorem</a>.</li>
     * <li>Calculate c by adding z<sub>i</sub> * 2<sup>i*2<sup>n-1</sup></sup> for all i, where z<sub>i</sub> is the
     * i-th piece of z.</li>
-    * <li>Return c reduced modulo 2<sup>2<sup>m+1</sup></sup>.</li>
+    * <li>Return c reduced modulo 2<sup>2<sup>m</sup></sup>+1. See the code for how m is calculated.</li>
     * </ol>
     *
     * References:
@@ -363,171 +360,1048 @@ object UtilBigEndian {
     * Schoenhage-Strassen-Algorithmus</a></li>
     * </ol>
     * @param a
-    * @param aBitLen
     * @param b
-    * @param bBitLen
     * @return a*b
     */
-  final def multiplySchoenhageStrassen(a: Array[Int], aBitLen: Int, b: Array[Int], bBitLen: Int): Array[Int] = {
-    // set M to the number of binary digits in a or b, whichever is greater
-    val M: Int = math.max(aBitLen, bBitLen)
-
-    // find the lowest m such that m>=log2(2M)
+  final def multiplySchoenhageStrassen(a: Array[Int], b: Array[Int]): Array[Int] = {
+    val square: Boolean = a eq b
+    val M: Int = Math.max(a.length * 32, b.length * 32)
     val m: Int = 32 - Integer.numberOfLeadingZeros(2 * M - 1 - 1)
-
     val n: Int = m / 2 + 1
-
-    // split a and b into pieces 1<<(n-1) bits long; assume n>=6 so pieces start and end at int boundaries
-    val even = m % 2 == 0
+    val even: Boolean = m % 2 == 0
     val numPieces: Int = if (even) 1 << n else 1 << (n + 1)
-    val pieceSize: Int = 1 << (n - 1 - 5) // in ints
+    val pieceSize: Int = 1 << (n - 1 - 5)
+    val numPiecesA: Int = (a.length + pieceSize) / pieceSize
+    val u: Array[Int] = new Array[Int]((numPiecesA * (3 * n + 5) + 31) / 32)
+    var uBitLength: Int = 0
 
-    // build u and v from a and b, allocating 3n+5 bits in u and v per n+2 bits from a and b, resp.
-    val numPiecesA = (a.length + pieceSize) / pieceSize
-    val u = new Array[Int]((numPiecesA * (3 * n + 5) + 31) / 32)
-    var uBitLength = 0
-    var i = 0
-    while (i < numPiecesA && i * pieceSize < a.length) {
-      appendBits(u, uBitLength, a, i * pieceSize, n + 2)
-      uBitLength += 3 * n + 5;
-      i += 1
+    {
+      var i: Int = 0
+      while (i < numPiecesA && i * pieceSize < a.length) {
+        {
+          appendBits(u, uBitLength, a, i * pieceSize, n + 2)
+          uBitLength += 3 * n + 5
+        }
+        ({
+          i += 1; i - 1
+        })
+      }
     }
-    val numPiecesB: Int = (b.length + pieceSize) / pieceSize;
-    val v = new Array[Int]((numPiecesB * (3 * n + 5) + 31) / 32)
-    var vBitLength = 0
-    var j = 0
-    while (j < numPiecesB && j * pieceSize < b.length) {
-      appendBits(v, vBitLength, b, j * pieceSize, n + 2)
-      vBitLength += 3 * n + 5
-      j += 1
-    }
+    var gamma: Array[Int] = null
+    if (square) gamma = new SBigInt(1, u).square.mag
+    else {
+      val numPiecesB: Int = (b.length + pieceSize) / pieceSize
+      val v: Array[Int] = new Array[Int]((numPiecesB * (3 * n + 5) + 31) / 32)
+      var vBitLength: Int = 0
 
-    val gamma: Array[Int] = (SBigInt.fromArray(1, u) * (SBigInt.fromArray(1, v))).arr // gamma = u * v
-    val gammai: Array[Array[Int]] = splitBits(gamma, 3 * n + 5);
+      {
+        var i: Int = 0
+        while (i < numPiecesB && i * pieceSize < b.length) {
+          {
+            appendBits(v, vBitLength, b, i * pieceSize, n + 2)
+            vBitLength += 3 * n + 5
+          }
+          ({
+            i += 1; i - 1
+          })
+        }
+      }
+      gamma = (new SBigInt(1, u) * new SBigInt(1, v)).mag
+    }
+    val gammai: Array[Array[Int]] = splitBits(gamma, 3 * n + 5)
     val halfNumPcs: Int = numPieces / 2
+    val zi: Array[Array[Int]] = new Array[Array[Int]](gammai.length)
 
-    val zi: Array[Array[Int]] = Array.ofDim[Int](gammai.length, 0)
-
-    var k = 0
-    while (k < gammai.length) {
-      zi(k) = gammai(k)
-      k += 1
+    {
+      var i: Int = 0
+      while (i < gammai.length) {
+        zi(i) = gammai(i)
+        ({
+          i += 1; i - 1
+        })
+      }
     }
-
-    var l = 0
-    while (l < gammai.length - halfNumPcs) {
-      subModPow2(zi(l), gammai(l + halfNumPcs), n + 2)
-      l += 1
+    {
+      var i: Int = 0
+      while (i < gammai.length - halfNumPcs) {
+        subModPow2(zi(i), gammai(i + halfNumPcs), n + 2)
+        ({
+          i += 1; i - 1
+        })
+      }
     }
-
-    var o = 0
-    while (o < gammai.length - 2 * halfNumPcs) {
-      addModPow2(zi(o), gammai(o + 2 * halfNumPcs), n + 2)
-      o += 1
+    {
+      var i: Int = 0
+      while (i < gammai.length - 2 * halfNumPcs) {
+        addModPow2(zi(i), gammai(i + 2 * halfNumPcs), n + 2)
+        ({
+          i += 1; i - 1
+        })
+      }
     }
-
-    var p = 0
-    while (p < gammai.length - 3 * halfNumPcs) {
-      subModPow2(zi(p), gammai(p + 3 * halfNumPcs), n + 2)
-      p += 1
+    {
+      var i: Int = 0
+      while (i < gammai.length - 3 * halfNumPcs) {
+        subModPow2(zi(i), gammai(i + 3 * halfNumPcs), n + 2)
+        ({
+          i += 1; i - 1
+        })
+      }
     }
+    val ai: Array[Array[Int]] = splitInts(a, halfNumPcs, pieceSize, (1 << (n - 5)) + 1)
+    var bi: Array[Array[Int]] = null
+    if (!square) bi = splitInts(b, halfNumPcs, pieceSize, (1 << (n - 5)) + 1)
+    val omega: Int = if (even) 4 else 2
+    val c: Array[Array[Int]] = new Array[Array[Int]](halfNumPcs)
+    if (square) {
+      dft(ai, omega)
+      modFn(ai)
 
-    // zr mod Fn
-    val ai: Array[Array[Int]] = splitInts(a, halfNumPcs, pieceSize, 1 << (n + 1 - 5))
-    val bi: Array[Array[Int]] = splitInts(b, halfNumPcs, pieceSize, 1 << (n + 1 - 5))
-    dft(ai, m, n)
-    dft(bi, m, n)
-    modFn(ai)
-    modFn(bi)
-    val c: Array[Array[Int]] = Array.ofDim[Int](halfNumPcs, 0)
-
-    var q = 0
-    while (q < c.length) {
-      c(q) = multModFn(ai(q), bi(q))
-      q += 1
+      {
+        var i: Int = 0
+        while (i < c.length) {
+          c(i) = squareModFn(ai(i))
+          ({
+            i += 1; i - 1
+          })
+        }
+      }
     }
+    else {
+      dft(ai, omega)
+      dft(bi, omega)
+      modFn(ai)
+      modFn(bi)
 
-    idft(c, m, n)
+      {
+        var i: Int = 0
+        while (i < c.length) {
+          c(i) = multModFn(ai(i), bi(i))
+          ({
+            i += 1; i - 1
+          })
+        }
+      }
+    }
+    idft(c, omega)
     modFn(c)
+    val z: Array[Int] = new Array[Int]((1 << (m - 5)) + 1)
 
-    val z: Array[Int] = new Array[Int](1 << (m + 1 - 5))
-    // calculate zr mod Fm from zr mod Fn and zr mod 2^(n+2), then add to z
-
-    var r: Int = 0
-    while (r < halfNumPcs) {
-      val eta: Array[Int] = if (r >= zi.length) new Array[Int]((n + 2 + 31) / 32) else zi(r)
-
-      // zi = delta = (zi-c[i]) % 2^(n+2)
-      subModPow2(eta, c(r), n + 2)
-
-      // z += zr<<shift = [ci + delta*(2^2^n+1)] << [i*2^(n-1)]
-      val shift = r * (1 << (n - 1 - 5)) // assume n>=6
-      addShifted(z, c(r), shift)
-      addShifted(z, eta, shift)
-      addShifted(z, eta, shift + (1 << (n - 5)))
-      r += 1
+    {
+      var i: Int = 0
+      while (i < halfNumPcs) {
+        {
+          val eta: Array[Int] = if (i >= zi.length) new Array[Int]((n + 2 + 31) / 32) else zi(i)
+          subModPow2(eta, c(i), n + 2)
+          val shift: Int = i * (1 << (n - 1 - 5))
+          addShifted(z, c(i), shift)
+          addShifted(z, eta, shift)
+          addShifted(z, eta, shift + (1 << (n - 5)))
+        }
+        ({
+          i += 1; i - 1
+        })
+      }
     }
-
-    modFn(z); // assume m>=5
+    modFn(z)
     return z
   }
 
   /**
-    * Adds two <b>positive</b> numbers (meaning they are interpreted as unsigned) modulo 2<sup>numBits</sup>.
-    * Both input values are given as <code>int</code> arrays.
-    * The result is returned in the first argument.
-    * @param a a number in base 2<sup>32</sup> starting with the highest digit
-    * @param b a number in base 2<sup>32</sup> starting with the highest digit
-    */
-  final def addModPow2(a: Array[Int], b: Array[Int], numBits: Int): Unit = {
-    val numElements = (numBits + 31) / 32
-    var carry = false;
-
-    var aIdx = a.length - 1
-    var bIdx = b.length - 1
-    var i: Int = numElements - 1
-    while (i >= 0) {
-      var sum = a(aIdx) + b(bIdx)
-      if (carry)
-        sum += 1
-      carry = ((sum >>> 31) < (a(aIdx) >>> 31) + (b(bIdx) >>> 31)) // carry if signBit(sum) < signBit(a)+signBit(b)
-      a(aIdx) = sum
-      aIdx -= 1
-      bIdx -= 1
-      i -= 1
+   * Estimates whether SS will be more efficient than the other methods when multiplying two numbers
+   * of a given length in bits.
+   * @param length the number of ints in each of the two factors
+   * @return <code>true</code> if SS is more efficient, <code>false</code> if Toom-Cook is more efficient
+   */
+  final def shouldUseSchoenhageStrassen(length: Int): Boolean = {
+    if (IS64BIT) {
+      if (length <= 3952) return false
+      if (length <= 4096) return true
+      if (length <= 6256) return false
+      if (length <= 8192) return true
+      if (length <= 10832) return false
+      if (length <= 16384) return true
+      if (length <= 17904) return false
+      return true
     }
-    a(0) &= -1 >>> (32 - (numBits % 32))
-    var j: Int = a.length - 1 - numElements
-    while (j >= 0) {
-      a(j) = 0
-      j -= 1
+    else {
+      if (length <= 2000) return false
+      if (length <= 2048) return true
+      if (length <= 3216) return false
+      if (length <= 4096) return true
+      if (length <= 5392) return false
+      if (length <= 8192) return true
+      if (length <= 9232) return false
+      return true
     }
   }
 
   /**
-    * Subtracts two <b>positive</b> numbers (meaning they are interpreted as unsigned) modulo 2<sup>numBits</sup>.
-    * Both input values are given as <code>int</code> arrays.
-    * The result is returned in the first argument.
-    * @param a a number in base 2<sup>32</sup> starting with the highest digit
-    * @param b a number in base 2<sup>32</sup> starting with the highest digit
-    */
-  final def subModPow2(a: Array[Int], b: Array[Int], numBits: Int): Unit = {
-    val numElements = (numBits + 31) / 32;
-    var carry = false;
-    var aIdx = a.length - 1
-    var bIdx = b.length - 1
-    var i = numElements - 1
-    while (i >= 0) {
-      var diff = a(aIdx) - b(bIdx);
-      if (carry)
-        diff -= 1
-      carry = ((diff >>> 31) > (a(aIdx) >>> 31) - (b(bIdx) >>> 31)); // carry if signBit(diff) > signBit(a)-signBit(b)
-      a(aIdx) = diff;
-      aIdx -= 1
-      bIdx -= 1
+   * Performs a modified
+   * <a href="http://en.wikipedia.org/wiki/Discrete_Fourier_transform_%28general%29#Number-theoretic_transform">
+   * Fermat Number Transform</a> on an array whose elements are <code>int</code> arrays.<br/>
+   * The modification is that the first step is omitted because only the upper half of the result is needed.<br/>
+   * This implementation uses <a href="http://www.nas.nasa.gov/assets/pdf/techreports/1989/rnr-89-004.pdf">
+   * Bailey's 4-step algorithm</a>.<br/>
+   * <code>A</code> is assumed to be the lower half of the full array and the upper half is assumed to be all zeros.
+   * The number of subarrays in <code>A</code> must be 2<sup>n</sup> if m is even and 2<sup>n+1</sup> if m is odd.<br/>
+   * Each subarray must be ceil(2<sup>n-1</sup>) bits in length.<br/>
+   * n must be equal to m/2-1.
+   * @param A
+   * @param omega 2 or 4
+   */
+  final def dft(A: Array[Array[Int]], omega: Int) {
+    val rows: Int = 1 << ((31 - Integer.numberOfLeadingZeros(A.length)) / 2)
+    val cols: Int = A.length / rows
+
+    {
+      var i: Int = 0
+      while (i < cols) {
+        dftBailey1(A, omega, rows, cols, i)
+        ({
+          i += 1; i - 1
+        })
+      }
+    }
+    applyDftWeights(A, omega, rows, cols)
+
+    {
+      var i: Int = 0
+      while (i < rows) {
+        dftBailey2(A, omega, rows, cols, i)
+        ({
+          i += 1; i - 1
+        })
+      }
+    }
+  }
+
+  /**
+   * Performs an DFT on column {@code colIdx}.<br/>
+   * <code>A</code> is assumed to be the lower half of the full array.
+   * @param A an array of length rows*cols
+   * @param omega root of unity
+   * @param rows number of rows in A
+   * @param cols number of columns in A
+   * @param colIdx index of the column to transform
+   */
+  final def dftBailey1(A: Array[Array[Int]], omega: Int, rows: Int, cols: Int, colIdx: Int) {
+    dftDirect(A, omega, rows, cols, rows, colIdx, cols)
+  }
+
+  /**
+   * Performs an DFT on row {@code rowIdx}.<br/>
+   * <code>A</code> is assumed to be the lower half of the full array.
+   * @param A an array of length rows*cols
+   * @param omega root of unity
+   * @param rows number of rows in A
+   * @param cols number of columns in A
+   * @param rowIdx index of the row to transform
+   */
+  final def dftBailey2(A: Array[Array[Int]], omega: Int, rows: Int, cols: Int, rowIdx: Int) {
+    dftDirect(A, omega, 0, rows, cols, rowIdx * cols, 1)
+  }
+
+  /** This implementation uses the radix-4 technique which combines two levels of butterflies. */
+  final def dftDirect(A: Array[Array[Int]], omega: Int, expOffset: Int, expScale: Int, len: Int, idxOffset: Int, stride: Int) {
+    val n: Int = 31 - Integer.numberOfLeadingZeros(2 * len)
+    var v: Int = 1
+    val intLen: Int = A(0).length
+    val d: Array[Int] = new Array[Int](intLen)
+    var slen: Int = len / 2
+    while (slen > 1) {
+      {
+        var j: Int = 0
+        while (j < len) {
+          {
+            val x1: Int = getDftExponent(n, v + 1, j + expOffset, omega) * expScale
+            val x2: Int = getDftExponent(n, v, j + expOffset, omega) * expScale
+            val x3: Int = getDftExponent(n, v + 1, j + slen + expOffset, omega) * expScale
+            var idx0: Int = stride * j + idxOffset
+            var idx1: Int = stride * j + stride * slen / 2 + idxOffset
+            var idx2: Int = idx0 + stride * slen
+            var idx3: Int = idx1 + stride * slen
+
+            {
+              var k: Int = slen - 1
+              while (k >= 0) {
+                {
+                  shiftLeftModFn(A(idx2), x2, d)
+                  System.arraycopy(A(idx0), 0, A(idx2), 0, intLen)
+                  addModFn(A(idx0), d)
+                  subModFn(A(idx2), d)
+                  shiftLeftModFn(A(idx3), x2, d)
+                  System.arraycopy(A(idx1), 0, A(idx3), 0, intLen)
+                  addModFn(A(idx1), d)
+                  subModFn(A(idx3), d)
+                  shiftLeftModFn(A(idx1), x1, d)
+                  System.arraycopy(A(idx0), 0, A(idx1), 0, intLen)
+                  addModFn(A(idx0), d)
+                  subModFn(A(idx1), d)
+                  shiftLeftModFn(A(idx3), x3, d)
+                  System.arraycopy(A(idx2), 0, A(idx3), 0, intLen)
+                  addModFn(A(idx2), d)
+                  subModFn(A(idx3), d)
+                  idx0 += stride
+                  idx1 += stride
+                  idx2 += stride
+                  idx3 += stride
+                }
+                k -= 2
+              }
+            }
+          }
+          j += 2 * slen
+        }
+      }
+      v += 2
+      slen /= 4
+    }
+    if (slen > 0) {
+      var j: Int = 0
+      while (j < len) {
+        {
+          val x: Int = getDftExponent(n, v, j + expOffset, omega) * expScale
+          var idx: Int = stride * j + idxOffset
+          var idx2: Int = idx + stride * slen
+
+          {
+            var k: Int = slen - 1
+            while (k >= 0) {
+              {
+                shiftLeftModFn(A(idx2), x, d)
+                System.arraycopy(A(idx), 0, A(idx2), 0, intLen)
+                addModFn(A(idx), d)
+                subModFn(A(idx2), d)
+                idx += stride
+                idx2 += stride
+              }
+              ({
+                k -= 1; k + 1
+              })
+            }
+          }
+        }
+        j += 2 * slen
+      }
+    }
+  }
+
+  /**
+   * Returns the power to which to raise omega in a DFT.<br/>
+   * When <code>omega</code>=4, this method doubles the exponent so
+   * <code>omega</code> can be assumed always to be 2 in {@link #dft(int[][], int)}.
+   * @param n the log of the DFT length
+   * @param v butterfly depth
+   * @param idx index of the array element to be computed
+   * @param omega 2 or 4
+   * @return
+   */
+  final def getDftExponent(n: Int, v: Int, idx: Int, omega: Int): Int = {
+    var x: Int = Integer.reverse(idx >>> (n - v)) >>> (32 - v)
+    x <<= n - v - 1
+    if (omega == 4) x *= 2
+    return x
+  }
+
+  /** Multiplies vector elements by powers of omega (aka twiddle factors) */
+  final def applyDftWeights(A: Array[Array[Int]], omega: Int, rows: Int, cols: Int) {
+    val v: Int = 31 - Integer.numberOfLeadingZeros(rows) + 1
+
+    {
+      var i: Int = 0
+      while (i < rows) {
+        {
+          var j: Int = 0
+          while (j < cols) {
+            {
+              val idx: Int = i * cols + j
+              val temp: Array[Int] = new Array[Int](A(idx).length)
+              var shiftAmt: Int = getBaileyShiftAmount(i, j, rows, v)
+              if (omega == 4) shiftAmt *= 2
+              shiftLeftModFn(A(idx), shiftAmt, temp)
+              System.arraycopy(temp, 0, A(idx), 0, temp.length)
+            }
+            ({
+              j += 1; j - 1
+            })
+          }
+        }
+        ({
+          i += 1; i - 1
+        })
+      }
+    }
+  }
+
+  final def getBaileyShiftAmount(i: Int, j: Int, rows: Int, v: Int): Int = {
+    val iRev: Int = Integer.reverse(i + rows) >>> (32 - v)
+    return iRev * j
+  }
+
+  /**
+   * Performs a modified
+   * <a href="http://en.wikipedia.org/wiki/Discrete_Fourier_transform_%28general%29#Number-theoretic_transform">
+   * Inverse Fermat Number Transform</a> on an array whose elements are <code>int</code> arrays.
+   * The modification is that the last step (the one where the upper half is subtracted from the lower half)
+   * is omitted.<br/>
+   * This implementation uses <a href="http://www.nas.nasa.gov/assets/pdf/techreports/1989/rnr-89-004.pdf">
+   * Bailey's 4-step algorithm</a>.<br/>
+   * <code>A</code> is assumed to be the upper half of the full array and the lower half is assumed to be all zeros.
+   * The number of subarrays in <code>A</code> must be 2<sup>n</sup> if m is even and 2<sup>n+1</sup> if m is odd.<br/>
+   * Each subarray must be ceil(2<sup>n-1</sup>) bits in length.<br/>
+   * n must be equal to m/2-1.
+   * @param A
+   * @param omega 2 or 4
+   */
+  final def idft(A: Array[Array[Int]], omega: Int) {
+    val rows: Int = 1 << ((31 - Integer.numberOfLeadingZeros(A.length)) / 2)
+    val cols: Int = A.length / rows
+
+    {
+      var i: Int = 0
+      while (i < rows) {
+        idftBailey2(A, omega, rows, cols, i)
+        ({
+          i += 1; i - 1
+        })
+      }
+    }
+    applyIdftWeights(A, omega, rows, cols)
+
+    {
+      var i: Int = 0
+      while (i < cols) {
+        idftBailey1(A, omega, rows, cols, i)
+        ({
+          i += 1; i - 1
+        })
+      }
+    }
+  }
+
+  /**
+   * Performs an IDFT on column {@code colIdx}.<br/>
+   * <code>A</code> is assumed to be the upper half of the full array.
+   * @param A an array of length rows*cols
+   * @param omega root of unity
+   * @param rows number of rows in A
+   * @param cols number of columns in A
+   * @param colIdx index of the column to transform
+   */
+  final def idftBailey1(A: Array[Array[Int]], omega: Int, rows: Int, cols: Int, colIdx: Int) {
+    idftDirect(A, omega, rows, rows, cols, colIdx, cols)
+  }
+
+  /**
+   * Performs an IDFT on row {@code rowIdx}.<br/>
+   * <code>A</code> is assumed to be the upper half of the full array.
+   * @param A an array of length rows*cols
+   * @param omega root of unity
+   * @param rows number of rows in A
+   * @param cols number of columns in A
+   * @param rowIdx index of the row to transform
+   */
+  def idftBailey2(A: Array[Array[Int]], omega: Int, rows: Int, cols: Int, rowIdx: Int) {
+    idftDirect(A, omega, cols, 0, rows, rowIdx * cols, 1)
+  }
+
+  /** This implementation uses the radix-4 technique which combines two levels of butterflies. */
+  final def idftDirect(A: Array[Array[Int]], omega: Int, len: Int, expOffset: Int, expScale: Int, idxOffset: Int, stride: Int) {
+    val n: Int = 31 - Integer.numberOfLeadingZeros(2 * len)
+    var v: Int = 31 - Integer.numberOfLeadingZeros(len)
+    val intLen: Int = A(0).length
+    val c: Array[Int] = new Array[Int](intLen)
+    var slen: Int = 1
+    while (slen <= len / 4) {
+      {
+        var j: Int = 0
+        while (j < len) {
+          {
+            val x1: Int = getDftExponent(n, v, j + expOffset, omega) * expScale + 1
+            val x2: Int = getDftExponent(n, v - 1, j + expOffset, omega) * expScale + 1
+            val x3: Int = getDftExponent(n, v, j + slen * 2 + expOffset, omega) * expScale + 1
+            var idx0: Int = stride * j + idxOffset
+            var idx1: Int = stride * j + stride * slen + idxOffset
+            var idx2: Int = idx0 + stride * slen * 2
+            var idx3: Int = idx1 + stride * slen * 2
+
+            {
+              var k: Int = slen - 1
+              while (k >= 0) {
+                {
+                  System.arraycopy(A(idx0), 0, c, 0, intLen)
+                  addModFn(A(idx0), A(idx1))
+                  shiftRightModFn(A(idx0), 1, A(idx0))
+                  subModFn(c, A(idx1))
+                  shiftRightModFn(c, x1, A(idx1))
+                  System.arraycopy(A(idx2), 0, c, 0, intLen)
+                  addModFn(A(idx2), A(idx3))
+                  shiftRightModFn(A(idx2), 1, A(idx2))
+                  subModFn(c, A(idx3))
+                  shiftRightModFn(c, x3, A(idx3))
+                  System.arraycopy(A(idx0), 0, c, 0, intLen)
+                  addModFn(A(idx0), A(idx2))
+                  shiftRightModFn(A(idx0), 1, A(idx0))
+                  subModFn(c, A(idx2))
+                  shiftRightModFn(c, x2, A(idx2))
+                  System.arraycopy(A(idx1), 0, c, 0, intLen)
+                  addModFn(A(idx1), A(idx3))
+                  shiftRightModFn(A(idx1), 1, A(idx1))
+                  subModFn(c, A(idx3))
+                  shiftRightModFn(c, x2, A(idx3))
+                  idx0 += stride
+                  idx1 += stride
+                  idx2 += stride
+                  idx3 += stride
+                }
+                ({
+                  k -= 1; k + 1
+                })
+              }
+            }
+          }
+          j += 4 * slen
+        }
+      }
+      v -= 2
+      slen *= 4
+    }
+    if (slen <= len / 2) {
+      var j: Int = 0
+      while (j < len) {
+        {
+          val x: Int = getDftExponent(n, v, j + expOffset, omega) * expScale + 1
+          var idx: Int = stride * j + idxOffset
+          var idx2: Int = idx + stride * slen
+
+          {
+            var k: Int = slen - 1
+            while (k >= 0) {
+              {
+                System.arraycopy(A(idx), 0, c, 0, intLen)
+                addModFn(A(idx), A(idx2))
+                shiftRightModFn(A(idx), 1, A(idx))
+                subModFn(c, A(idx2))
+                shiftRightModFn(c, x, A(idx2))
+                idx += stride
+                idx2 += stride
+              }
+              ({
+                k -= 1; k + 1
+              })
+            }
+          }
+        }
+        j += 2 * slen
+      }
+    }
+  }
+
+  /** Divides vector elements by powers of omega (aka twiddle factors) */
+  final def applyIdftWeights(A: Array[Array[Int]], omega: Int, rows: Int, cols: Int) {
+    val v: Int = 31 - Integer.numberOfLeadingZeros(rows) + 1
+
+    {
+      var i: Int = 0
+      while (i < rows) {
+        {
+          var j: Int = 0
+          while (j < cols) {
+            {
+              val idx: Int = i * cols + j
+              val temp: Array[Int] = new Array[Int](A(idx).length)
+              var shiftAmt: Int = getBaileyShiftAmount(i, j, rows, v)
+              if (omega == 4) shiftAmt *= 2
+              shiftRightModFn(A(idx), shiftAmt, temp)
+              System.arraycopy(temp, 0, A(idx), 0, temp.length)
+            }
+            ({
+              j += 1; j - 1
+            })
+          }
+        }
+        ({
+          i += 1; i - 1
+        })
+      }
+    }
+  }
+
+  /**
+   * Adds two <b>positive</b> numbers (meaning they are interpreted as unsigned) modulo 2<sup>2<sup>n</sup></sup>+1,
+   * where n is <code>a.length*32/2</code>; in other words, n is half the number of bits in
+   * <code>a</code>.<br/>
+   * Both input values are given as <code>int</code> arrays; they must be the same length.
+   * The result is returned in the first argument.
+   * @param a a number in base 2<sup>32</sup> starting with the highest digit; the array's length must be 2^n+1 for some n
+   * @param b a number in base 2<sup>32</sup> starting with the highest digit; must be the same length as a
+   */
+  final def addModFn(a: Array[Int], b: Array[Int]) {
+    var carry: Boolean = false
+
+    {
+      var i: Int = a.length - 1
+      while (i >= 0) {
+        {
+          var sum: Int = a(i) + b(i)
+          if (carry) ({
+            sum += 1; sum - 1
+          })
+          carry = ((sum >>> 31) < (a(i) >>> 31) + (b(i) >>> 31))
+          a(i) = sum
+        }
+        ({
+          i -= 1; i + 1
+        })
+      }
+    }
+    var i: Int = a.length - 1
+    while (carry && i >= 0) {
+      val sum: Int = a(i) + 1
+      a(i) = sum
+      carry = sum == 0
       i -= 1
     }
-    a(aIdx + 1) &= -1 >>> (32 - (numBits % 32))
+    modFn(a)
+  }
+
+  /**
+   * Subtracts two <b>positive</b> numbers (meaning they are interpreted as unsigned) modulo 2<sup>2<sup>n</sup></sup>+1,
+   * where n is <code>a.length*32/2</code>; in other words, n is half the number of bits in
+   * <code>a</code>.<br/>
+   * Both input values are given as <code>int</code> arrays; they must be the same length.
+   * The result is returned in the first argument.
+   * @param a a number in base 2<sup>32</sup> starting with the highest digit; the array's length must be 2^n+1 for some n
+   * @param b a number in base 2<sup>32</sup> starting with the highest digit; must be the same length as a
+   */
+  final def subModFn(a: Array[Int], b: Array[Int]) {
+    var borrow: Boolean = false
+
+    {
+      var i: Int = a.length - 1
+      while (i >= 0) {
+        {
+          var diff: Int = a(i) - b(i)
+          if (borrow) ({
+            diff -= 1; diff + 1
+          })
+          borrow = ((diff >>> 31) > (a(i) >>> 31) - (b(i) >>> 31))
+          a(i) = diff
+        }
+        ({
+          i -= 1; i + 1
+        })
+      }
+    }
+    if (borrow) {
+      a(0) += 1
+      var i: Int = a.length - 1
+      var carry: Boolean = true
+      while (carry && i >= 0) {
+        val sum: Int = a(i) + 1
+        a(i) = sum
+        carry = sum == 0
+        i -= 1
+      }
+    }
+  }
+
+  /**
+   * Multiplies two <b>positive</b> numbers (meaning they are interpreted as unsigned) modulo 2<sup>n</sup>+1,
+   * and returns the result in a new array.<br/>
+   * <code>a</code> and <code>b</code> are assumed to be reduced mod 2<sup>n</sup>+1, i.e. 0&le;a&lt;2<sup>n</sup>+1
+   * and 0&le;b&lt;2<sup>n</sup>+1, where n is <code>a.length*32/2</code>; in other words, n is half the number
+   * of bits in <code>a</code>.<br/>
+   * Both input values are given as <code>int</code> arrays; they must be the same length.
+   * @param a a number in base 2<sup>32</sup> starting with the highest digit; the array's length must be 2^n+1 for some n
+   * @param b a number in base 2<sup>32</sup> starting with the highest digit; must be the same length as a
+   */
+  final def multModFn(a: Array[Int], b: Array[Int]): Array[Int] = {
+    if (a(0) == 1 && b(0) == 1) {
+      val c: Array[Int] = new Array[Int](a.length)
+      c(c.length - 1) = 1
+      return c
+    }
+    else {
+      val aBigInt: SBigInt = new SBigInt(1, a)
+      val bBigInt: SBigInt = new SBigInt(1, b)
+      val c: Array[Int] = (aBigInt * bBigInt).mag
+      val cpad: Array[Int] = new Array[Int](a.length - 1 + b.length - 1)
+      System.arraycopy(c, 0, cpad, cpad.length - c.length, c.length)
+      modFnLong(cpad)
+      return java.util.Arrays.copyOfRange(cpad, cpad.length / 2 - 1, cpad.length)
+    }
+  }
+
+  /** @see #multModFn(int[], int[]) */
+  final def squareModFn(a: Array[Int]): Array[Int] = {
+    if (a(0) == 1) {
+      val c: Array[Int] = new Array[Int](a.length)
+      c(c.length - 1) = 1
+      return c
+    }
+    else {
+      val aBigInt: SBigInt = new SBigInt(1, a)
+      val c: Array[Int] = aBigInt.square.mag
+      val cpad: Array[Int] = new Array[Int](2 * a.length - 2)
+      System.arraycopy(c, 0, cpad, cpad.length - c.length, c.length)
+      modFnLong(cpad)
+      return java.util.Arrays.copyOfRange(cpad, cpad.length / 2 - 1, cpad.length)
+    }
+  }
+
+  /** Like {@link #modFn(int[])} but expects the argument to be 2^(n+1) bits long. */
+  final def modFnLong(a: Array[Int]) {
+    val len: Int = a.length
+    var carry: Boolean = false
+
+    {
+      var i: Int = len - 1
+      while (i >= len / 2) {
+        {
+          val bi: Int = a(i - len / 2)
+          var diff: Int = a(i) - bi
+          if (carry) ({
+            diff -= 1; diff + 1
+          })
+          carry = ((diff >>> 31) > (a(i) >>> 31) - (bi >>> 31))
+          a(i) = diff
+        }
+        ({
+          i -= 1; i + 1
+        })
+      }
+    }
+    {
+      var i: Int = len / 2 - 1
+      while (i >= 0) {
+        a(i) = 0
+        ({
+          i -= 1; i + 1
+        })
+      }
+    }
+    if (carry) {
+      var j: Int = len - 1
+      do {
+        val sum: Int = a(j) + 1
+        a(j) = sum
+        carry = sum == 0
+        j -= 1
+        //if (j <= 0) break //TODO: break is not supported
+      } while (carry && j <= 0)
+    }
+  }
+
+  /**
+   * Reduces a number modulo F<sub>n</sub>. The value of n is determined from the array's length.
+   * @param a a number in base 2<sup>32</sup> starting with the highest digit; the array's length must be 2^n+1 for some n
+   */
+  final def modFn(a: Array[Int]) {
+    val len: Int = a.length
+    val bi: Int = a(0)
+    var diff: Int = a(len - 1) - bi
+    var borrow: Boolean = ((diff >>> 31) > (a(len - 1) >>> 31) - (bi >>> 31))
+    a(len - 1) = diff
+    a(0) = 0
+    if (borrow) {
+      var i: Int = len - 2
+      do {
+        diff = a(i) - 1
+        a(i) = diff
+        borrow = diff == -1
+        i -= 1
+      } while (borrow && i >= 0)
+    }
+    if (borrow) {
+      var i: Int = a.length - 1
+      var carry: Boolean = true
+      a(0) = 0
+      while (carry && i >= 0) {
+        val sum: Int = a(i) + 1
+        a(i) = sum
+        carry = sum == 0
+        i -= 1
+      }
+    }
+  }
+
+  final def modFn(a: Array[Array[Int]]) {
+    var i: Int = 0
+    while (i < a.length) {
+      modFn(a(i))
+      i += 1
+    }
+  }
+
+  /**
+   * Multiplies a number by 2<sup>-numBits</sup> modulo 2<sup>2<sup>n</sup></sup>+1, where n is
+   * <code>a.length*32/2</code>; in other words, n is half the number of bits in <code>a</code>.
+   * "Right" means towards the higher array indices and the lower bits<br/>.
+   * This is equivalent to extending the number to <code>2*(a.length-1)</code> ints and cyclicly
+   * shifting it to the right by <code>numBits</code> bits.<br/>
+   * The result is returned in the third argument.
+   * @param a a number in base 2<sup>32</sup> starting with the highest digit; the array's length must be 2^n+1 for some n
+   * @param numBits the shift amount in bits; must be less than <code>32*2*(len-1))</code>
+   * @param b the return value; must be at least as long as <code>a</code>
+   */
+  final def shiftRightModFn(a: Array[Int], numBits: Int, b: Array[Int]) {
+    val len: Int = a.length
+    if (numBits >= 32 * (len - 1)) {
+      shiftLeftModFn(a, 32 * 2 * (len - 1) - numBits, b)
+      return
+    }
+    val numElements: Int = numBits / 32
+    if (numElements > 0) {
+      var borrow: Boolean = false
+
+      {
+        var i: Int = 1
+        while (i < len - numElements) {
+          {
+            var diff: Int = a(i)
+            if (borrow) ({
+              diff -= 1; diff + 1
+            })
+            b(numElements + i) = diff
+            borrow = diff == -1 && borrow
+          }
+          ({
+            i += 1; i - 1
+          })
+        }
+      }
+      var diff: Int = 0
+      if (numElements < len - 1) diff = a(0) - a(len - 1)
+      else diff = 0
+      if (borrow) {
+        diff -= 1
+        borrow = diff == -1
+      }
+      else borrow = a(0) == 0 && a(len - 1) != 0
+      b(numElements) = diff
+
+      {
+        var i: Int = 1
+        while (i < numElements) {
+          {
+            b(numElements - i) = -a(len - 1 - i)
+            if (borrow) ({
+              b(numElements - i) -= 1; b(numElements - i) + 1
+            })
+            borrow = b(numElements - i) != 0 || borrow
+          }
+          ({
+            i += 1; i - 1
+          })
+        }
+      }
+      var carry: Boolean = borrow
+      if (carry) {
+        b(0) = 0
+        var i: Int = len - 1
+        do {
+          val sum: Int = b(i) + 1
+          b(i) = sum
+          carry = sum == 0
+          i -= 1
+        } while (carry && i >= 0)
+      }
+      else b(0) = 0
+    }
+    else System.arraycopy(a, 0, b, 0, len)
+    val numBitsFrac: Int = numBits % 32
+    if (numBitsFrac != 0) {
+      val bhi: Int = b(len - 1) << (32 - numBitsFrac)
+      b(len - 1) >>>= numBitsFrac
+
+      {
+        var i: Int = len - 1
+        while (i > 0) {
+          {
+            b(i) |= b(i - 1) << (32 - numBitsFrac)
+            b(i - 1) >>>= numBitsFrac
+          }
+          ({
+            i -= 1; i + 1
+          })
+        }
+      }
+      val diff: Int = b(1) - bhi
+      val borrow: Boolean = ((diff >>> 31) > (b(1) >>> 31) - (bhi >>> 31))
+      b(1) = diff
+      var carry: Boolean = borrow
+      if (carry) {
+        b(0) = 0
+        var i: Int = len - 1
+        do {
+          val sum: Int = b(i) + 1
+          b(i) = sum
+          carry = sum == 0
+          i -= 1
+        } while (carry && i >= 0)
+      }
+      else b(0) = 0
+    }
+  }
+
+  /**
+   * Multiplies a number by 2<sup>numBits</sup> modulo 2<sup>2<sup>n</sup></sup>+1, where n is
+   * <code>a.length*32/2</code>; in other words, n is half the number of bits in <code>a</code>.
+   * "Left" means towards the higher array indices and the lower bits<br/>.
+   * This is equivalent to extending the number to <code>2*(a.length-1)</code> ints and cyclicly
+   * shifting it to the left by <code>numBits</code> bits.<br/>
+   * The result is returned in the third argument.
+   * @param a a number in base 2<sup>32</sup> starting with the highest digit; the array's length must be 2^n+1 for some n
+   * @param numBits the shift amount in bits
+   * @param b the return value; must be at least as long as <code>a</code>
+   */
+  final def shiftLeftModFn(a: Array[Int], numBits: Int, b: Array[Int]) {
+    val len: Int = a.length
+    if (numBits > 32 * (len - 1)) {
+      shiftRightModFn(a, 32 * 2 * (len - 1) - numBits, b)
+      return
+    }
+    val numElements: Int = numBits / 32
+    if (numElements > 0) {
+      var borrow: Boolean = false
+
+      {
+        var i: Int = 0
+        while (i < numElements) {
+          {
+            b(len - 1 - i) = -a(numElements - i)
+            if (borrow) ({
+              b(len - 1 - i) -= 1; b(len - 1 - i) + 1
+            })
+            borrow = b(len - 1 - i) != 0 || borrow
+          }
+          ({
+            i += 1; i - 1
+          })
+        }
+      }
+      var diff: Int = 0
+      if (numElements < len - 1) diff = a(len - 1) - a(0)
+      else diff = -a(0)
+      if (borrow) {
+        diff -= 1
+        borrow = diff == -1
+      }
+      else borrow = a(0) == 1 && diff == -1
+      b(len - 1 - numElements) = diff
+
+      {
+        var i: Int = 1
+        while (i < len - numElements - 1) {
+          {
+            diff = a(len - 1 - i)
+            if (borrow) ({
+              diff -= 1; diff + 1
+            })
+            b(len - 1 - numElements - i) = diff
+            borrow = diff == -1 && borrow
+          }
+          ({
+            i += 1; i - 1
+          })
+        }
+      }
+      var carry: Boolean = borrow
+      if (carry) {
+        b(0) = 0
+        var i: Int = len - 1
+        do {
+          val sum: Int = b(i) + 1
+          b(i) = sum
+          carry = sum == 0
+          i -= 1
+        } while (carry && i >= 0)
+      }
+      else b(0) = 0
+    }
+    else System.arraycopy(a, 0, b, 0, len)
+    val numBitsFrac: Int = numBits % 32
+    if (numBitsFrac != 0) {
+      b(0) <<= numBitsFrac
+
+      {
+        var i: Int = 1
+        while (i < len) {
+          b(i - 1) |= b(i) >>> (32 - numBitsFrac)
+          b(i) <<= numBitsFrac
+          i += 1
+        }
+      }
+    }
+    modFn(b)
+  }
+
+  /**
+   * Adds two numbers, <code>a</code> and <code>b</code>, after shifting <code>b</code> by
+   * <code>numElements</code> elements.<br/>
+   * Both numbers are given as <code>int</code> arrays and must be <b>positive</b> numbers
+   * (meaning they are interpreted as unsigned).<br/>
+   * The result is returned in the first argument.
+   * If any elements of b are shifted outside the valid range for <code>a</code>, they are dropped.
+   * @param a a number in base 2<sup>32</sup> starting with the highest digit
+   * @param b a number in base 2<sup>32</sup> starting with the highest digit
+   * @param numElements
+   */
+  final def addShifted(a: Array[Int], b: Array[Int], numElements: Int) {
+    var carry: Boolean = false
+    var aIdx: Int = a.length - 1 - numElements
+    var bIdx: Int = b.length - 1
+    var i: Int = Math.min(aIdx, bIdx)
+    while (i >= 0) {
+      val ai: Int = a(aIdx)
+      var sum: Int = ai + b(bIdx)
+      if (carry) ({
+        sum += 1; sum - 1
+      })
+      carry = ((sum >>> 31) < (ai >>> 31) + (b(bIdx) >>> 31)) // carry if signBit(sum) < signBit(a)+signBit(b)
+      a(aIdx) = sum
+      i -= 1
+      aIdx -= 1
+      bIdx -= 1
+    }
+    while (carry && aIdx >= 0) {
+      a(aIdx) += 1
+      carry = a(aIdx) == 0
+      aIdx -= 1
+    }
+  }
+
+  /**
+   * Adds two <b>positive</b> numbers (meaning they are interpreted as unsigned) modulo 2<sup>numBits</sup>.
+   * Both input values are given as <code>int</code> arrays.
+   * The result is returned in the first argument.
+   * @param a a number in base 2<sup>32</sup> starting with the highest digit
+   * @param b a number in base 2<sup>32</sup> starting with the highest digit
+   */
+  final def addModPow2(a: Array[Int], b: Array[Int], numBits: Int) {
+    val numElements: Int = (numBits + 31) / 32
+    var carry: Boolean = false
+    var i: Int = 0
+    var aIdx: Int = a.length - 1
+    var bIdx: Int = b.length - 1
+
+    {
+      i = numElements - 1
+      while (i >= 0) {
+        var sum: Int = a(aIdx) + b(bIdx)
+        if (carry) ({
+          sum += 1; sum - 1
+        })
+        carry = ((sum >>> 31) < (a(aIdx) >>> 31) + (b(bIdx) >>> 31)) // carry if signBit(sum) < signBit(a)+signBit(b)
+        a(aIdx) = sum
+        aIdx -= 1
+        bIdx -= 1
+        i -= 1
+      }
+    }
+    if (numElements > 0) a(aIdx + 1) &= -1 >>> (32 - (numBits % 32))
     while (aIdx >= 0) {
       a(aIdx) = 0
       aIdx -= 1
@@ -535,298 +1409,37 @@ object UtilBigEndian {
   }
 
   /**
-    * Performs a
-    * <a href="http://en.wikipedia.org/wiki/Discrete_Fourier_transform_%28general%29#Number-theoretic_transform">
-    * Fermat Number Transform</a> on an array whose elements are <code>int</code> arrays.<br/>
-    * <code>A</code> is assumed to be the lower half of the full array and the upper half is assumed to be all zeros.
-    * The number of subarrays in <code>A</code> must be 2<sup>n</sup> if m is even and 2<sup>n+1</sup> if m is odd.<br/>
-    * Each subarray must be ceil(2<sup>n-1</sup>) bits in length.<br/>
-    * n must be equal to m/2-1.
-    * @param A
-    * @param m
-    * @param n
-    */
-  final def dft(A: Array[Array[Int]], m: Int, n: Int): Unit = {
-    val even = m % 2 == 0;
-    val len = A.length;
-    var v = 1;
-    val d = new Array[Int](A(0).length)
+   * Subtracts two <b>positive</b> numbers (meaning they are interpreted as unsigned) modulo 2<sup>numBits</sup>.
+   * Both input values are given as <code>int</code> arrays.
+   * The result is returned in the first argument.
+   * @param a a number in base 2<sup>32</sup> starting with the highest digit
+   * @param b a number in base 2<sup>32</sup> starting with the highest digit
+   */
+  final def subModPow2(a: Array[Int], b: Array[Int], numBits: Int) {
+    val numElements: Int = (numBits + 31) / 32
+    var carry: Boolean = false
+    var i: Int = 0
+    var aIdx: Int = a.length - 1
+    var bIdx: Int = b.length - 1
 
-    var slen = len / 2 // slen = #consecutive coefficients for which the sign (add/sub) and x are constant
-    while (slen > 0) {
-
-      var j = 0
-      while (j < len) {
-        var idx = j;
-        val x = dftExponent(n, v, idx + len, even);
-
-        var k = slen - 1
-        while (k >= 0) {
-          cyclicShiftLeftBits(A(idx + slen), x, d);
-          scala.compat.Platform.arraycopy(A(idx), 0, A(idx + slen), 0, A(idx).length); // copy A[idx] into A[idx+slen]
-          addModFn(A(idx), d);
-          subModFn(A(idx + slen), d);
-          idx += 1
-          k -= 1
-        }
-
-        j += 2 * slen
+    {
+      i = numElements - 1
+      while (i >= 0) {
+        var diff: Int = a(aIdx) - b(bIdx)
+        if (carry) ({
+          diff -= 1; diff + 1
+        })
+        carry = ((diff >>> 31) > (a(aIdx) >>> 31) - (b(bIdx) >>> 31)) // carry if signBit(diff) > signBit(a)-signBit(b)
+        a(aIdx) = diff
+        aIdx -= 1
+        bIdx -= 1
+        i -= 1
       }
-
-      v += 1
-      slen /= 2
     }
-  }
-
-  /**
-    * Returns the power to which to raise omega in a DFT.<br/>
-    * Omega itself is either 2 or 4 depending on m, but when omega=4 this method
-    * doubles the exponent so omega can be assumed always to be 2 in a DFT.
-    * @param n
-    * @param v
-    * @param idx
-    * @param even
-    * @return
-    */
-  final def dftExponent(n: Int, v: Int, idx: Int, even: Boolean): Int = {
-    // take bits n-v..n-1 of idx, reverse them, shift left by n-v-1
-    var x = Integer.reverse(idx) << (n - v) >>> (31 - n);
-
-    // if m is even, divide by two
-    if (even)
-      x >>>= 1
-
-    x
-  }
-
-  /**
-    * Performs a modified
-    * <a href="http://en.wikipedia.org/wiki/Discrete_Fourier_transform_%28general%29#Number-theoretic_transform">
-    * Inverse Fermat Number Transform</a> on an array whose elements are <code>int</code> arrays.
-    * The modification is that the last step (the one where the upper half is subtracted from the lower half)
-    * is omitted.<br/>
-    * <code>A</code> is assumed to be the upper half of the full array and the upper half is assumed to be all zeros.
-    * The number of subarrays in <code>A</code> must be 2<sup>n</sup> if m is even and 2<sup>n+1</sup> if m is odd.<br/>
-    * Each subarray must be ceil(2<sup>n-1</sup>) bits in length.<br/>
-    * n must be equal to m/2-1.
-    * @param A
-    * @param m
-    * @param n
-    */
-  final def idft(A: Array[Array[Int]], m: Int, n: Int): Unit = {
-    val even = m % 2 == 0;
-    val len = A.length;
-    var v = n - 1;
-    val c = new Array[Int](A(0).length)
-
-    var slen = 1 // slen = #consecutive coefficients for which the sign (add/sub) and x are constant
-    while (slen <= len / 2) {
-      var j = 0
-      while (j < len) {
-        var idx = j
-        var idx2 = idx + slen // idx2 is always idx+slen
-        val x = idftExponent(n, v, idx, even)
-
-        var k = slen - 1
-        while (k >= 0) {
-          scala.compat.Platform.arraycopy(A(idx), 0, c, 0, c.length) // copy A[idx] into c
-          addModFn(A(idx), A(idx2))
-          cyclicShiftRight(A(idx), 1, A(idx))
-
-          subModFn(c, A(idx2))
-          cyclicShiftRight(c, x, A(idx2))
-          idx += 1
-          idx2 += 1
-          k -= 1
-        }
-        j += 2 * slen
-      }
-
-      v -= 1
-      slen *= 2
-    }
-  }
-
-  /**
-    * Returns the power to which to raise omega in an IDFT.<br/>
-    * Omega itself is either 2 or 4 depending on m, but when omega=4 this method
-    * doubles the exponent so omega can be assumed always to be 2 in a IDFT.
-    * @param n
-    * @param v
-    * @param idx
-    * @param even
-    * @return
-    */
-  final def idftExponent(n: Int, v: Int, idx: Int, even: Boolean): Int = {
-    var x = Integer.reverse(idx) << (n - v) >>> (32 - n)
-    x += (if (even) 1 << (n - v) else 1 << (n - 1 - v))
-    return x + 1
-  }
-
-  /**
-    * Adds two <b>positive</b> numbers (meaning they are interpreted as unsigned) modulo 2<sup>2<sup>n+1</sup></sup>,
-    * where n is <code>a.length*32/2</code>; in other words, n is half the number of bits in
-    * <code>a</code>.<br/>
-    * Both input values are given as <code>int</code> arrays; they must be the same length.
-    * The result is returned in the first argument.
-    * @param a a number in base 2<sup>32</sup> starting with the highest digit; the length must be a power of 2
-    * @param b a number in base 2<sup>32</sup> starting with the highest digit; the length must be a power of 2
-    */
-  final def addModFn(a: Array[Int], b: Array[Int]): Unit = {
-    var carry = false
-    var i = a.length - 1
-    while (i >= 0) {
-      var sum = a(i) + b(i)
-      if (carry)
-        sum += 1
-      carry = ((sum >>> 31) < (a(i) >>> 31) + (b(i) >>> 31)) // carry if signBit(sum) < signBit(a)+signBit(b)
-      a(i) = sum
-      i -= 1
-    }
-
-    // take a mod Fn by adding any remaining carry bit to the lowest bit;
-    // since Fn is congruent to 1 (mod 2^n), it suffices to add 1
-    var j = a.length - 1
-    while (carry) {
-      var sum = a(j) + 1
-      a(j) = sum;
-      carry = sum == 0
-      j -= 1
-      if (j < 0)
-        j = a.length
-    }
-  }
-
-  /**
-    * Subtracts two <b>positive</b> numbers (meaning they are interpreted as unsigned) modulo 2<sup>2<sup>n+1</sup></sup>,
-    * where n is <code>a.length*32/2</code>; in other words, n is half the number of bits in
-    * <code>a</code>.<br/>
-    * Both input values are given as <code>int</code> arrays; they must be the same length.
-    * The result is returned in the first argument.
-    * @param a a number in base 2<sup>32</sup> starting with the highest digit; the length must be a power of 2
-    * @param b a number in base 2<sup>32</sup> starting with the highest digit; the length must be a power of 2
-    */
-  final def subModFn(a: Array[Int], b: Array[Int]): Unit = {
-    // subtraction works by shifting b by b.length/2, then adding a and b
-    var carry = false;
-    var bIdx: Int = b.length / 2 - 1
-    var i = a.length - 1
-    while (i >= a.length / 2) {
-      var sum = a(i) + b(bIdx)
-      if (carry)
-        sum += 1
-      carry = ((sum >>> 31) < (a(i) >>> 31) + (b(bIdx) >>> 31)) // carry if signBit(sum) < signBit(a)+signBit(b)
-      a(i) = sum;
-      bIdx -= 1
-      i -= 1
-    }
-    bIdx = b.length - 1
-    var j = a.length / 2 - 1
-    while (i >= 0) {
-      var sum = a(i) + b(bIdx)
-      if (carry)
-        sum += 1
-      carry = ((sum >>> 31) < (a(i) >>> 31) + (b(bIdx) >>> 31)) // carry if signBit(sum) < signBit(a)+signBit(b)
-      a(i) = sum
-      bIdx -= 1
-      i -= 1
-    }
-
-    // take a mod Fn by adding any remaining carry bit to the lowest bit;
-    // since Fn is congruent to 1 (mod 2^n), it suffices to add 1
-    var k = a.length - 1;
-    while (carry) {
-      var sum = a(k) + 1;
-      a(k) = sum
-      carry = sum == 0;
-      k -= 1
-      if (k < 0)
-        k = a.length;
-    }
-  }
-
-  /**
-    * Multiplies two <b>positive</b> numbers (meaning they are interpreted as unsigned) modulo Fn
-    * where Fn=2<sup>2<sup>n+1</sup></sup>, and returns the result in a new array.<br/>
-    * <code>a</code> and <code>b</code> are assumed to be reduced mod Fn, i.e. 0&le;a&lt;Fn and 0&le;b&lt;Fn,
-    * where n is <code>a.length*32/2</code>; in other words, n is half the number of bits in
-    * <code>a</code>.<br/>
-    * Both input values are given as <code>int</code> arrays; they must be the same length.
-    * @param a a number in base 2<sup>32</sup> starting with the highest digit; the length must be a power of 2
-    * @param b a number in base 2<sup>32</sup> starting with the highest digit; the length must be a power of 2
-    */
-  final def multModFn(a: Array[Int], b: Array[Int]): Array[Int] = {
-    val a0 = java.util.Arrays.copyOfRange(a, a.length / 2, a.length)
-    val b0 = java.util.Arrays.copyOfRange(b, b.length / 2, b.length)
-
-    val aBigInt = SBigInt.fromArray(1, a0)
-    val bBigInt = SBigInt.fromArray(1, b0)
-    val c = (aBigInt * bBigInt).arr
-
-    // make sure c is the same length as a and b
-    val cpad = new Array[Int](a.length)
-    scala.compat.Platform.arraycopy(c, 0, cpad, a.length - c.length, c.length)
-
-    val n = a.length / 2;
-    // special case: if a=Fn-1, add b*2^2^n which is the same as subtracting b
-    if (a(n - 1) == 1) {
-      val b0pad = new Array[Int](cpad.length)
-      scala.compat.Platform.arraycopy(b0, 0, b0pad, cpad.length - b0.length, b0.length)
-      subModFn(cpad, b0pad)
-    }
-    if (b(n - 1) == 1) {
-      val a0pad = new Array[Int](cpad.length)
-      scala.compat.Platform.arraycopy(a0, 0, a0pad, cpad.length - a0.length, a0.length)
-      subModFn(cpad, a0pad)
-    }
-    return cpad
-  }
-
-  final def modFn(a: Array[Int]): Unit = {
-    val len = a.length
-    var carry = false
-
-    var i = len - 1
-    while (i >= len / 2) {
-      val bi = a(i - len / 2)
-      var diff = a(i) - bi
-      if (carry)
-        diff -= 1
-      carry = ((diff >>> 31) > (a(i) >>> 31) - (bi >>> 31)); // carry if signBit(diff) > signBit(a)-signBit(b)
-      a(i) = diff;
-      i -= 1
-    }
-
-    var j = len / 2 - 1
-    while (j >= 0) {
-      a(j) = 0
-      j -= 1
-    }
-
-    // if result is negative, add Fn; since Fn is congruent to 1 (mod 2^n), it suffices to add 1
-    if (carry) {
-      var k = len - 1;
-      do {
-        var sum = a(j) + 1;
-        a(k) = sum;
-        carry = sum == 0;
-        k -= 1
-        if (k <= 0)
-          k = len;
-      } while (carry);
-    }
-  }
-
-  /**
-    * Reduces all subarrays modulo 2<sup>2<sup>n+1</sup></sup> where n=<code>a[i].length*32/2</code> for all i;
-    * in other words, n is half the number of bits in the subarray.
-    * @param a int arrays whose length is a power of 2
-    */
-  final def modFn(a: Array[Array[Int]]): Unit = {
-    var i = 0
-    while (i < a.length) {
-      modFn(a(i))
-      i += 1
+    if (numElements > 0) a(aIdx + 1) &= -1 >>> (32 - (numBits % 32))
+    while (aIdx >= 0) {
+      a(aIdx) = 0
+      aIdx -= 1
     }
   }
 
@@ -889,40 +1502,6 @@ object UtilBigEndian {
         i += 1
       }
       b(b.length - 1) |= b0 >>> (32 - numBits);
-    }
-  }
-
-  /**
-    * Adds two numbers, <code>a</code> and <code>b</code>, after shifting <code>b</code> by
-    * <code>numElements</code> elements.<br/>
-    * Both numbers are given as <code>int</code> arrays and must be <b>positive</b> numbers
-    * (meaning they are interpreted as unsigned).</br> The result is returned in the first
-    * argument.
-    * If any elements of b are shifted outside the valid range for <code>a</code>, they are dropped.
-    * @param a a number in base 2<sup>32</sup> starting with the highest digit
-    * @param b a number in base 2<sup>32</sup> starting with the highest digit
-    * @param numElements
-    */
-  final def addShifted(a: Array[Int], b: Array[Int], numElements: Int): Unit = {
-    var carry = false;
-    var aIdx = a.length - 1 - numElements
-    var bIdx = b.length - 1
-    var i = math.min(aIdx, bIdx)
-    while (i >= 0) {
-      val ai = a(aIdx)
-      var sum = ai + b(bIdx)
-      if (carry)
-        sum += 1
-      carry = ((sum >>> 31) < (ai >>> 31) + (b(bIdx) >>> 31)) // carry if signBit(sum) < signBit(a)+signBit(b)
-      a(aIdx) = sum
-      i -= 1
-      aIdx -= 1
-      bIdx -= 1
-    }
-    while (carry) {
-      a(aIdx) += 1
-      carry = a(aIdx) == 0;
-      aIdx -= 1
     }
   }
 
@@ -1155,5 +1734,14 @@ object UtilBigEndian {
     return (q, r)
   }
 
-  final def ones(bits: Int): SBigInt = ???
+  /**
+    * Returns an <code>n</code>-int number all of whose bits are ones
+    * @param n number of ints in the <code>mag</code> array
+    * @return a number equal to <code>ONE.shiftLeft(32*n).subtract(ONE)</code>
+    */
+  final def ones(n: Int): SBigInt = {
+    val mag: Array[Int] = new Array[Int](n)
+    java.util.Arrays.fill(mag, -1);
+    new SBigInt(1, mag);
+  }
 }

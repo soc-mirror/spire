@@ -197,7 +197,7 @@ class SBigIntTest extends FunSuite {
     assert(bi >= bi2 === false)
   }
 
-  ignore("BigInt#toString") {
+  test("BigInt#toString") {
     for (i <- interestingValues) {
       assert(SBigInt(i).toString === BigInteger.valueOf(i).toString)
     }

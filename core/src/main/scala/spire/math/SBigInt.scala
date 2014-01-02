@@ -2,6 +2,8 @@ package spire.math
 
 import language.implicitConversions
 
+import java.util.ArrayList
+
 import scala.math.{ ScalaNumber, ScalaNumericConversions }
 import scala.math.{ BigInt => _ }
 
@@ -35,7 +37,9 @@ object SBigInt {
 
   private val LogTwo: Double = math.log(2.0)
 
-  private val StringZeros = Array(
+  //CONSTANTS∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧//
+
+  private[math] val StringZeros = Array(
     "", "0", "00", "000", "0000", "00000", "000000", "0000000", "00000000", "000000000",
     "0000000000", "00000000000", "000000000000", "0000000000000", "00000000000000",
     "000000000000000", "0000000000000000", "00000000000000000", "000000000000000000",
@@ -71,11 +75,116 @@ object SBigInt {
     "00000000000000000000000000000000000000000000000000000000000000",
     "000000000000000000000000000000000000000000000000000000000000000")
 
-  @transient private var logCache: Array[Double] = null
+  /** Stores the maximum exponent for each radix from 0 - 36,
+    * so that `radix.pow(DigitsPerLong)` fits into a positive Long value.
+    *
+    * Note that radices of 0 and 1 are not supported.
+    */
+  private[math] val DigitsPerLong: Array[Int] = Array(
+      -1, -1, 62, 39, 31, 27, 24, 22, 20, 19, 18, 18, 17, 17, 16, 16, 15, 15, 15,
+      14, 14, 14, 14, 13, 13, 13, 13, 13, 13, 12, 12, 12, 12, 12, 12, 12, 12)
 
-  @transient private var powerCache: Array[java.util.ArrayList[SBigInt]] = null
+  private var logCache: Array[Double] = null
 
-  //CONSTANTS∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧//
+  /** The cache of powers of each radix.  This allows us to not have to
+    * recalculate powers of `radix^(2^n)` more than once.  This speeds
+    * Schoenhage recursive base conversion significantly.
+    */
+  private var powerCache: Array[ArrayList[SBigInt]] = null
+
+  /** Initialize the cache of radix^(2^x) values used for base conversion
+    * with just the very first value.  Additional values will be created
+    * on demand.
+    */
+  private def initCaches(): Unit = {
+    powerCache = new Array[ArrayList[SBigInt]](Character.MAX_RADIX+1)
+    logCache = new Array[Double](Character.MAX_RADIX+1)
+    var i = Character.MIN_RADIX
+
+    while (i <= Character.MAX_RADIX) {
+      powerCache(i) = new ArrayList[SBigInt](1)
+      powerCache(i).add(SBigInt(i))
+      logCache(i) = scala.math.log(i)
+      i += 1
+    }
+  }
+
+  initCaches()
+
+
+  /** Converts the specified BigInteger to a string and appends to
+    * `sb`. This implements the recursive Schoenhage algorithm
+    * for base conversions.
+    *
+    * See Knuth, Donald, _The Art of Computer Programming_, Vol. 2,
+    * Answers to Exercises (4.4) Question 14.
+    *
+    * @param u The number to convert to a string.
+    * @param sb The StringBuilder that will be appended to in place.
+    * @param radix The base to convert to.
+    * @param digits The minimum number of digits to pad to.
+    */
+  private def toString(u: SBigInt, sb: java.lang.StringBuilder, radix: Int, digits: Int): Unit = {
+    /* If we're smaller than a certain threshold, use the smallToString
+     * method, padding with leading zeroes when necessary. */
+    if (u.mag.length <= SchönhageBaseConversionThreshold) {
+      val s = u smallToString radix
+
+      // Pad with internal zeros if necessary.
+      // Don't pad if we're at the beginning of the string.
+      if ((s.length < digits) && (sb.length > 0)) {
+        var i = s.length
+        while (i < digits) {
+          sb.append('0') // do this?
+          i += 1
+        }
+      }
+
+      sb.append(s);
+      return ;
+    }
+
+    val b = u.bitLength();
+
+    // Calculate a value for n in the equation radix^(2^n) = u
+    // and subtract 1 from that value. This is used to find the
+    // cache index that contains the best value to divide u.
+    val n: Int = math.round(math.log(b * SBigInt.LogTwo / (SBigInt logCache radix)) / SBigInt.LogTwo - 1.0).toInt
+    val v = SBigInt.radixConversionCache(radix, n);
+    val (quot, rem) = u /% v
+
+    val expectedDigits = 1 << n;
+
+    // Now recursively build the two halves of each number.
+    toString(quot, sb, radix, digits - expectedDigits)
+    toString(rem, sb, radix, expectedDigits)
+  }
+
+  /**
+    * Returns the value radix^(2^exponent) from the cache.
+    * If this value doesn't already exist in the cache, it is added.
+    * <p/>
+    * This could be changed to a more complicated caching method using
+    * <code>Future</code>.
+    */
+  private[math] def radixConversionCache(radix: Int, exponent: Int): SBigInt = synchronized {
+    var retVal: SBigInt = null
+    val cacheLine: ArrayList[SBigInt] = powerCache(radix)
+    val oldSize: Int = cacheLine.size
+    if (exponent >= oldSize) {
+      cacheLine.ensureCapacity(exponent+1)
+      var i = oldSize
+      while (i <= exponent){
+        retVal = cacheLine.get(i-1).square
+        cacheLine.add(i, retVal)
+        i += 1
+      }
+    } else {
+      retVal = cacheLine.get(exponent)
+    }
+    return retVal;
+  }
+
   //FACTORIES∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨//
 
   /**
@@ -332,7 +441,7 @@ object SBigInt {
 @SerialVersionUID(1L)
 final class SBigInt private[math] (final val signum: Int, private[math] final val arr: Array[Int])
   extends ScalaNumber with ScalaNumericConversions with Ordered[SBigInt] with Serializable {
-  //TODO: Reject magnitudes with bitLength > Int.MaxValue
+  require(arr.length <= Int.MaxValue / 32, "bitLength > Int.MaxValue") // Reject magnitudes with bitLength > Int.MaxValue
 
   //ATTRIBUTESv∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨//
 
@@ -345,6 +454,10 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
   @Finished
   @Tested
   def isOne: Boolean = signum == 1 && arr.length == 1 && arr(0) == 1
+  @Finished
+  def isPositive: Boolean = this.signum == 1
+  @Finished
+  def isNegative: Boolean = this.signum == -1
   @Finished
   @Tested
   def isEven: Boolean = isZero || ((arr(0) & 0x1) == 0)
@@ -384,9 +497,6 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
 
   @inline
   def mag = arr
-
-  def isPositive: Boolean = this.signum == 1
-  def isNegative: Boolean = this.signum == -1
 
   def testBit(atPos: Int): Boolean = ???
 
@@ -476,7 +586,7 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
   @Tested
   def unary_- : SBigInt = new SBigInt(-signum, arr)
 
-  @WorkInProgress
+  @Tested
   def +(that: SBigInt): SBigInt = {
     /* Check if one of the numbers are zero and return the other one.
      * `that` needs to be checked first, so that a NPE gets thrown if it is null. */
@@ -516,7 +626,7 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
 
   }
 
-  @WorkInProgress
+  @Tested
   def -(that: SBigInt): SBigInt = {
     // If that is zero, return this.
     if (that.signum == 0) return this
@@ -605,8 +715,7 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
       return divideBarrett(that);
   }
 
-  /**
-    * Returns a BigInteger whose value is {@code (this / val)} using an O(n^2) algorithm from Knuth.
+  /** Returns a BigInteger whose value is {@code (this / val)} using an O(n^2) algorithm from Knuth.
     *
     * @param val value by which this BigInteger is to be divided.
     * @return {@code this / val}
@@ -616,6 +725,13 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
   private[math] def divideKnuth(that: SBigInt): SBigInt = ???
   private[math] def remainderKnuth(that: SBigInt): SBigInt = ???
   private[math] def divideAndRemainderKnuth(that: SBigInt): (SBigInt, SBigInt) = ???
+//  {
+//    val a = this.abs
+//    val b = that.abs
+//    val (quot, rem) = a divideAndRemainderKnuth b // <== FIXME
+//    val newSignum = if (this.signum == that.signum) 1 else -1
+//    (quot withSignum newSignum, rem withSignum this.signum)
+//  }
 
   /**
     * Estimates whether Barrett Division will be more efficient than Burnikel-Ziegler when
@@ -941,57 +1057,6 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
   private def squareToomCook3 = ???
   private def squareSchoenhageStrassen = ???
 
-  /**
-    * Estimates whether SS will be more efficient than the other methods when squaring a number
-    * of a given length in bits.
-    * @param bitLength the number of ints in the number to be squared
-    * @return <code>true</code> if SS is more efficient, <code>false</code> if Toom-Cook is more efficient
-    * @see #shouldMultiplySchoenhageStrassen(int)
-    */
-  private def shouldSquareSchoenhageStrassen(length: Int): Boolean = {
-    if (IS64BIT) {
-      if (length < 15000)
-        return false
-      if (length < 16384) // 2^14
-        return true
-      if (length < 27100)
-        return false
-      if (length < 32768) // 2^15
-        return true
-      if (length < 43600)
-        return false
-      if (length < 65536) // 2^16
-        return true
-      if (length < 76300)
-        return false
-      if (length < 131072) // 2^17
-        return true
-      if (length < 133800)
-        return false
-      return true
-    } else {
-      if (length < 7100)
-        return false
-      if (length < 8192) // 2^13
-        return true
-      if (length < 14200)
-        return false
-      if (length < 16384) // 2^14
-        return true
-      if (length < 24100)
-        return false
-      if (length < 32768) // 2^15
-        return true
-      if (length < 42800)
-        return false
-      if (length < 65536) // 2^16
-        return true
-      if (length < 73000)
-        return false
-      return true
-    }
-  }
-
   /** Returns the minimum of this and that. */
   def min(that: SBigInt): SBigInt =
     if (this <= that) this
@@ -1111,6 +1176,17 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
 
   @Tested
   def abs = if (signum < 0) -this else this
+
+  def withSignum(signum: Int) =
+    if (signum < -1 || signum > 1) {
+      throw new IllegalArgumentException(s"Invalid signum: $signum")
+    } else if (this.signum == signum) {
+      this
+    } else if (signum == 0) {
+      SBigInt.Zero
+    } else {
+      new SBigInt(signum, arr)
+    }
 
   //ARITHMETIC∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧∧//
   //BIT-OPERATIONS∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨∨//
@@ -1240,10 +1316,10 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
     // The results will be concatenated into this StringBuilder
     val sb = new java.lang.StringBuilder
     if (signum < 0) {
-      toString(-this, sb, radix, 0)
+      SBigInt.toString(-this, sb, radix, 0)
       sb.insert(0, '-');
     } else
-      toString(this, sb, radix, 0)
+      SBigInt.toString(this, sb, radix, 0)
 
     return sb.toString()
   }
@@ -1252,83 +1328,8 @@ final class SBigInt private[math] (final val signum: Int, private[math] final va
   private def smallToString(radix: Int): String = {
     if (signum == 0)
       return "0"
+
     ???
-  }
-
-  /**
-    * Converts the specified BigInteger to a string and appends to
-    * <code>sb</code>. This implements the recursive Schoenhage algorithm
-    * for base conversions.
-    * <p/>
-    * See Knuth, Donald, _The Art of Computer Programming_, Vol. 2,
-    * Answers to Exercises (4.4) Question 14.
-    *
-    * @param u The number to convert to a string.
-    * @param sb The StringBuilder that will be appended to in place.
-    * @param radix The base to convert to.
-    * @param digits The minimum number of digits to pad to.
-    */
-  private def toString(u: SBigInt, sb: java.lang.StringBuilder, radix: Int, digits: Int): Unit = {
-    /* If we're smaller than a certain threshold, use the smallToString
-     * method, padding with leading zeroes when necessary. */
-    if (u.mag.length <= SchönhageBaseConversionThreshold) {
-      val s = u smallToString radix
-
-      // Pad with internal zeros if necessary.
-      // Don't pad if we're at the beginning of the string.
-      if ((s.length < digits) && (sb.length > 0)) {
-        var i = s.length
-        while (i < digits) {
-          sb.append('0') // do this?
-          i += 1
-        }
-      }
-
-      sb.append(s);
-      return ;
-    }
-
-    val b = u.bitLength();
-
-    // Calculate a value for n in the equation radix^(2^n) = u
-    // and subtract 1 from that value. This is used to find the
-    // cache index that contains the best value to divide u.
-    val n: Int = math.round(math.log(b * SBigInt.LogTwo / (SBigInt logCache radix)) / SBigInt.LogTwo - 1.0).toInt
-    val v = radixConversionCache(radix, n);
-    val results = u.divideAndRemainder(v)
-
-    val expectedDigits = 1 << n;
-
-    // Now recursively build the two halves of each number.
-    toString(results(0), sb, radix, digits - expectedDigits)
-    toString(results(1), sb, radix, expectedDigits)
-  }
-
-  /**
-    * Returns the value radix^(2^exponent) from the cache.
-    * If this value doesn't already exist in the cache, it is added.
-    * <p/>
-    * This could be changed to a more complicated caching method using
-    * <code>Future</code>.
-    */
-  private def radixConversionCache(radix: Int, exponent: Int): SBigInt = {
-    this.synchronized {
-      var retVal: SBigInt = null;
-      val cacheLine = SBigInt.powerCache(radix)
-      val oldSize = cacheLine.size
-      if (exponent >= oldSize) {
-        cacheLine.ensureCapacity(exponent + 1);
-        var i = oldSize
-        while (i <= exponent) {
-          retVal = cacheLine.get(i - 1).square
-          cacheLine.add(i, retVal);
-          i += 1
-        }
-      } else
-        retVal = cacheLine.get(exponent);
-
-      return retVal;
-    }
   }
 
   def toBinaryString: String = signToString + (if (isZero) "0" else binStr)
